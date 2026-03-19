@@ -125,6 +125,10 @@ def group_high_prio_and_render_jobs(jobs):
 
         # Retire les suffixes
         clean_name = job_name
+
+        #TODO : clean this up
+        if clean_name.endswith('__OPTI1024'):
+            clean_name = clean_name[:-len('__OPTI1024')]
                     
         if clean_name.endswith('_high_prio_render'):
             clean_name = clean_name[:-len('_high_prio_render')]
