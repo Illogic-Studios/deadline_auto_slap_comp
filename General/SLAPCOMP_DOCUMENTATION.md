@@ -1,5 +1,3 @@
-This documentation was initially written for the internal technical doc, it may or may not be entirely adapted to be a github doc
-
 # SLAPCOMP TOOL - DOCUMENTATION TECHNIQUE
 
 **Version:** 2.0 (Refactorisé Décembre 2025)
