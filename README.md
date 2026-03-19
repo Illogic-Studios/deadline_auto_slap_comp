@@ -1,93 +1,553 @@
-# SlapIt
+This documentation was initially written for the internal technical doc, it may or may not be entirely adapted to be a github doc
 
+# SLAPCOMP TOOL - DOCUMENTATION TECHNIQUE
 
+**Version:** 2.0 (Refactorisé Décembre 2025)
+**Auteur:** Pipeline Team
+**But:** Créer automatiquement des comps Nuke à partir de render layers Deadline/Prism
 
-## Getting started
+---
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+## 1. ARCHITECTURE
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
-
-## Add your files
-
-* [Create](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#create-a-file) or [upload](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#upload-a-file) files
-* [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
+### Fichiers principaux
 
 ```
-cd existing_repo
-git remote add origin http://gitlab.illogic.lan/illogic/deadline/slapit.git
-git branch -M main
-git push -uf origin main
+DeadlineRepository/custom/scripts/
+├── Jobs/
+│   ├── slapIt.py              # Interface interactive (clic droit sur job Deadline)
+│   └── autoSlapIt.py          # Mode automatique (sans UI)
+├── General/
+│   ├── SlapCompCore.py        # Logique métier partagée (CORE)
+│   ├── SlapCompUI_Qt.py       # Interface Qt pour sélection layers/versions
+│   └── SLAPCOMP_DOCUMENTATION.md  # Ce fichier
+└── Submission/SlapComp/
+    └── SubmitSlapCompToDeadline.py  # Soumission job Nuke à Deadline
 ```
 
-## Integrate with your tools
+### Flux de données
 
-* [Set up project integrations](http://gitlab.illogic.lan/illogic/deadline/slapit/-/settings/integrations)
+```
+USER (sélection job Deadline)
+  │
+  ▼
+slapIt.py
+  │
+  ├──> SlapCompCore.get_output_dirs(jobs)
+  │     │
+  │     ├──> Deadline API (jobs, batches, frames, completion)
+  │     ├──> Filesystem scan (Prism structure)
+  │     └──> Return: Liste de layers/versions disponibles
+  │
+  ├──> SlapCompUI_Qt.show_slap_comp_dialog(layers)
+  │     │
+  │     └──> USER sélectionne layers, versions, merge operations, preset
+  │           Return: Configuration utilisateur
+  │
+  └──> SlapCompCore.call_nuke_script(user_selection)
+        │
+        ├──> Génère script Nuke (.nk)
+        ├──> Auto-incrémente version (v001, v002...)
+        ├──> Crée structure Prism (Scenefiles/Renders)
+        └──> Soumet job à Deadline via SubmitSlapCompToDeadline.py
+```
 
-## Collaborate with your team
+---
 
-* [Invite team members and collaborators](https://docs.gitlab.com/ee/user/project/members/)
-* [Create a new merge request](https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html)
-* [Automatically close issues from merge requests](https://docs.gitlab.com/ee/user/project/issues/managing_issues.html#closing-issues-automatically)
-* [Enable merge request approvals](https://docs.gitlab.com/ee/user/project/merge_requests/approvals/)
-* [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+## 2. CONVENTIONS DE NOMMAGE CRITIQUES
 
-## Test and Deploy
+### RÈGLE IMPORTANTE : Dual Naming System
 
-Use the built-in continuous integration in GitLab.
+**Fichiers (.nk, .exr) = SANS nom de projet**
+```
+CAPS03_SH0230_SlapComp_v001.nk
+CAPS03_SH0230_SlapComp_v001.0002.exr
+```
 
-* [Get started with GitLab CI/CD](https://docs.gitlab.com/ee/ci/quick_start/)
-* [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/ee/user/application_security/sast/)
-* [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/ee/topics/autodevops/requirements.html)
-* [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/ee/user/clusters/agent/)
-* [Set up protected environments](https://docs.gitlab.com/ee/ci/environments/protected_environments.html)
+**Job Deadline = AVEC nom de projet**
+```
+VCA_Perlee_2510_CAPS03_SH0230_SlapComp_v001
+```
 
-***
+**Implémentation:** `build_prism_slapcomp_paths()` retourne :
+- `base_name` : pour fichiers (sans projet)
+- `job_name` : pour Deadline (avec projet)
 
-# Editing this README
+### Structure Prism attendue
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+```
+I:/PROJECT_NAME/03_Production/Shots/SEQUENCE/SHOT/
+├── Scenefiles/Compo/SlapComp/
+│   └── SEQ_SHOT_SlapComp_v001.nk
+└── Renders/
+    ├── 3dRender/LAYER/vXXX/beauty/*.exr
+    └── 2dRender/SlapComp/v001/
+        └── SEQ_SHOT_SlapComp_v001.%04d.exr
+```
 
-## Suggestions for a good README
+---
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+## 3. FONCTIONS CLÉS (SlapCompCore.py)
 
-## Name
-Choose a self-explaining name for your project.
+### 3.1 Détection et Parsing
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+#### `extract_prism_from_filesystem_path(directory)`
+**But:** Extraire métadonnées Prism depuis un chemin filesystem
+**Entrée:** `I:/VCA_Perlee_2510/03_Production/Shots/CAPS03/SH0230/Renders/3dRender/BG/v001`
+**Sortie:**
+```python
+{
+    'project': 'VCA_Perlee_2510',
+    'sequence': 'CAPS03',
+    'shot': 'SH0230',
+    'shot_path': 'I:/VCA_Perlee_2510/03_Production/Shots/CAPS03/SH0230'
+}
+```
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+#### `extract_prism_from_job_name(job)`
+**But:** Extraire métadonnées depuis nom de job Deadline (fallback)
+**Pattern:** `PROJECT_SEQUENCE-SHOT_LAYER_vVERSION`
+**Exemple:** `VCA_Perlee_2510_CAPS03-SH0230_BG_v001_render`
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+#### `get_prism_info_smart(job, output_dirs)`
+**But:** Wrapper intelligent - essaie filesystem d'abord, fallback sur job name
+**Usage:** Toujours utiliser cette fonction pour robustesse
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+#### `detect_image_sequence_info(directory)`
+**But:** Scanner un dossier pour détecter séquences d'images
+**Détecte:** Nom de fichier, frame range, padding, total frames
+**Pattern supportés:** `*.exr`, `*.dpx`, `*.png`, `*.jpg`, `*.tif`
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+### 3.2 Versioning
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+#### `get_existing_slapcomp_versions(shot_path, sequence, shot)`
+**But:** Lister toutes les versions existantes de SlapComp pour un shot
+**Retour:** `['v001', 'v002', 'v003']`
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+#### `get_next_version_number(existing_versions)`
+**But:** Calculer prochain numéro de version
+**Exemple:** `['v001', 'v002']` → retourne `3`
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+### 3.3 Agrégation Deadline
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+#### `group_high_prio_and_render_jobs(jobs)`
+**But:** Grouper jobs Deadline par base name + version
+**Exemple:**
+```
+VCA_Project_CAPS01_SH0100_CHARS_v005_high_prio
+VCA_Project_CAPS01_SH0100_CHARS_v005_render
+↓
+Groupés ensemble comme "CHARS v005"
+```
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+#### `get_combined_job_completion(jobs)`
+**But:** Calculer complétion combinée de plusieurs jobs (high_prio + render)
+**Retour:**
+```python
+{
+    'status': 'Completed',      # Completed / Active / Failed
+    'completion': 100,           # Pourcentage 0-100
+    'completed_frames': 80,
+    'total_frames': 80
+}
+```
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+**IMPORTANT - Vérification Filesystem:**
+Si `total_completed == 0` mais jobs "Completed", le code vérifie automatiquement le filesystem avec `detect_image_sequence_info()` pour obtenir la vraie complétion.
 
-## License
-For open source projects, say how it is licensed.
+### 3.4 Génération Nuke Script
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+#### `call_nuke_script(output_info, department, project, preset_name)`
+**But:** Point d'entrée principal - génère .nk et soumet à Deadline
+**Processus:**
+1. Parse Prism info depuis `output_info[0]['directory']`
+2. Détermine version (auto-increment si existe)
+3. Appelle `build_prism_slapcomp_paths()` pour chemins
+4. Génère script Nuke avec `generate_nuke_script()`
+5. Crée dossiers si nécessaire
+6. Écrit fichier .nk
+7. Soumet à Deadline avec `submit_to_deadline()`
+
+#### `generate_nuke_script(output_info, render_path, render_filename, first_frame, last_frame)`
+**But:** Génère le code Python du script Nuke
+**Contenu:**
+- Configuration root node (frame range, format, colorspace)
+- Nodes Read (un par layer, positionnés horizontalement)
+- Nodes Merge (merge operations configurables)
+- Node Write (output final)
+- **Node Graph Layout:** Espacement automatique (200px horizontal, 100px vertical)
+
+### 3.5 Soumission Deadline
+
+#### `submit_to_deadline(job_name, scenefile_path, render_dir, first_frame, last_frame, dependencies)`
+**But:** Créer et soumetir job Nuke à Deadline
+**Propriétés job:**
+- `ChunkSize=5` (5 frames par task)
+- `ConcurrentTasks=2` (2 tasks max simultanés)
+- `Priority=50`
+- `Pool=nuke`
+- `Group=comp`
+- **Dependencies:** Job attend automatiquement si source renders incomplets
+
+---
+
+## 4. INTERFACE UTILISATEUR (SlapCompUI_Qt.py)
+
+### Composants Qt
+
+```python
+QTableWidget avec colonnes:
+- Layer Name (QLabel)
+- Include (QCheckBox)
+- Version (QComboBox avec toutes versions disponibles)
+- Completion % (QLabel + QProgressBar)
+- Merge Operation (QComboBox: over, plus, multiply, screen, etc.)
+```
+
+### Presets
+
+**Fichier:** `C:/Users/<user>/slapcomp_presets.json`
+
+**Format:**
+```json
+{
+  "Project preset": {
+    "layer_order": ["BG", "CHARS", "FX", "VEGET"],
+    "merge_operations": {
+      "BG": "over",
+      "CHARS": "over",
+      "FX": "plus"
+    }
+  }
+}
+```
+
+**Comportement:**
+- Layers dans preset → Cochés par défaut, réordonnés selon `layer_order`
+- Layers hors preset → **Décochés par défaut**, ajoutés à la fin
+
+### Fonctions clés
+
+#### `group_output_info_for_ui(output_info)`
+**But:** Transformer liste plate en structure groupée par layer
+**Input:** Liste de dicts (1 par version)
+**Output:**
+```python
+{
+    'CHARS': {
+        'layer_name': 'CHARS',
+        'versions': [
+            {'version': 'v001', 'completion_percent': 100, 'directory': '...'},
+            {'version': 'v002', 'completion_percent': 50, 'directory': '...'}
+        ],
+        'project': 'VCA_Perlee_2510',
+        'sequence': 'CAPS03',
+        'shot': 'SH0230',
+        'included': True
+    }
+}
+```
+
+#### `apply_preset_data(layers_dict, preset_data)`
+**But:** Appliquer preset (ordre, merge ops, inclusion)
+**Effet:** Modifie `layers_dict` in-place
+
+---
+
+## 5. SOUMISSION DEADLINE (SubmitSlapCompToDeadline.py)
+
+### Job Info File
+
+```ini
+Plugin=Nuke
+Name=VCA_Project_CAPS03_SH0230_SlapComp_v001
+BatchName=VCA_Project_CAPS03_SH0230_SlapComp_v001
+Department=Compo
+Pool=nuke
+Group=comp
+Priority=50
+Frames=1-80
+ChunkSize=5
+ConcurrentTasks=2
+```
+
+### Plugin Info File
+
+```ini
+SceneFile=I:/Project/03_Production/.../SlapComp/SEQ_SHOT_SlapComp_v001.nk
+Version=15.1
+OutputDirectory0=I:/Project/.../Renders/2dRender/SlapComp/v001
+WriteNode0=Write1
+```
+
+### Dependencies
+
+Si `dependencies` fourni (liste de job IDs), ajoute à job info:
+```ini
+JobDependencies=673bc123456789abcd,673bc987654321dcba
+```
+
+**Comportement:** Job reste en "Pending" jusqu'à ce que tous les jobs source soient "Completed"
+
+---
+
+## 6. WORKFLOW UTILISATEUR
+
+### Mode interactif (slapIt.py)
+
+1. **Sélection job** dans Deadline Monitor
+2. **Clic droit** → Scripts → slapIt
+3. **UI s'ouvre** avec layers détectés
+4. **Utilisateur configure:**
+   - Coche/décoche layers
+   - Sélectionne versions
+   - Change merge operations
+   - Applique preset si souhaité
+5. **Clique OK**
+6. **Script génère:**
+   - `.nk` file dans `Scenefiles/Compo/SlapComp/`
+   - Version auto-incrémentée (v001, v002...)
+   - Job Deadline soumis automatiquement
+
+### Mode automatique (autoSlapIt.py)
+
+1. **Même processus** mais sans UI
+2. **Sélection automatique:**
+   - Toutes les dernières versions
+   - Tous les layers inclus
+   - Merge operation par défaut: "over"
+
+---
+
+## 7. GESTION DES ERREURS ET FALLBACKS
+
+### Détection Prism
+
+**Ordre de tentative:**
+1. `extract_prism_from_filesystem_path(directory)` ← **Préféré**
+2. `extract_prism_from_job_name(job)` ← Fallback
+3. Mode non-Prism (paths manuels) ← Dernier recours
+
+### Complétion Frames
+
+**Problème:** Jobs anciens ont `JobCompletedTasks` vide même si "Completed"
+
+**Solution (implémentée):**
+```python
+if total_completed == 0 and total_frames > 0 and status == 'Completed':
+    # Vérifier filesystem
+    seq_info = detect_image_sequence_info(output_dir)
+    total_frames = seq_info['total_frames']
+    total_completed = seq_info['total_frames']
+    # Maintenant: 80/80 = 100% au lieu de 0/77 = 0%
+```
+
+### Detection Image Sequences
+
+**Stratégie:** Scanner 3 niveaux de profondeur
+```
+LAYER/vXXX/*.exr          ← Niveau 1
+LAYER/vXXX/beauty/*.exr   ← Niveau 2 (PRÉFÉRÉ pour Prism)
+LAYER/vXXX/subdir/*.exr   ← Niveau 3
+```
+
+---
+
+## 8. CONFIGURATION SYSTÈME
+
+### Prérequis
+
+- **Deadline 10.x** avec Repository network share
+- **Nuke 15.x** installé sur render nodes
+- **Python 2.7** (Deadline) ou **Python 3.x** (selon config)
+- **Qt/PySide2** pour UI
+
+### Paths configurables
+
+**Dans SlapCompCore.py:**
+```python
+# Ligne 85: Fallback Nuke executable
+fallback_path = r"C:/Program Files/Nuke15.1v5/Nuke15.1.exe"
+
+# Ligne 701: Department par défaut
+default_department = 'Compo'
+```
+
+**Dans SubmitSlapCompToDeadline.py:**
+```python
+# Ligne 54: Deadline command
+deadlinecommand = os.path.join(deadline_bin, 'deadlinecommand.exe')
+
+# Ligne 86: Propriétés job
+Pool=nuke
+Group=comp
+Priority=50
+ChunkSize=5
+ConcurrentTasks=2
+```
+
+---
+
+## 9. DÉPANNAGE
+
+### Problème: Fichiers sauvés au mauvais endroit
+
+**Cause:** Prism info non détecté
+**Solution:** Vérifier que `output_info[0]['directory']` contient chemin Prism valide
+**Pattern attendu:** `*/03_Production/Shots/SEQUENCE/SHOT/*`
+
+### Problème: 0% completion pour jobs terminés
+
+**Cause:** `JobCompletedTasks` vide dans Deadline API
+**Solution:** Code vérifie automatiquement filesystem (depuis v2.0)
+**Log à chercher:** `"Jobs marked as Completed but 0/X frames reported, checking filesystem..."`
+
+### Problème: Job dependencies ne fonctionnent pas
+
+**Cause:** `job_id` ou `job_ids` non propagés dans data pipeline
+**Vérifier:**
+- `group_output_info_for_ui()` inclut ces champs (ligne 1142-1143)
+- `SlapCompUI_Qt.get_result()` les passe (ligne 534-535)
+
+### Problème: Preset non appliqué correctement
+
+**Cause:** Format JSON invalide ou clés manquantes
+**Vérifier:**
+```json
+{
+  "preset_name": {
+    "layer_order": [...],      # OBLIGATOIRE
+    "merge_operations": {...}  # OPTIONNEL
+  }
+}
+```
+
+### Problème: Nom de fichier avec nom de projet
+
+**Cause:** Utilisation de `job_name` au lieu de `base_name`
+**Solution:** `build_prism_slapcomp_paths()` retourne les deux - utiliser `base_name` pour fichiers
+
+---
+
+## 10. MAINTENANCE ET ÉVOLUTION
+
+### Ajout d'un nouveau layer pattern
+
+**Fichier:** `SlapCompCore.py` ligne ~160
+**Fonction:** `extract_layer_from_job_name()`
+
+```python
+LAYER_PATTERNS = [
+    r'_([A-Z_]+)_v\d+',           # Pattern standard
+    r'_([A-Z][a-z]+)_v\d+',       # Nouveau pattern à ajouter
+]
+```
+
+### Ajout support Houdini/Husk
+
+**Décommenter et implémenter:**
+```python
+def convert_padding_to_nuke(pattern):
+    """Convertir $F4 (Houdini) ou %04d (Maya) vers #### (Nuke)"""
+    # Code à implémenter
+```
+
+**Note:** Actuellement inutile car `detect_image_sequence_info()` génère automatiquement les patterns Nuke.
+
+### Ajout nouvelle merge operation
+
+**Fichier:** `SlapCompUI_Qt.py` ligne ~290
+
+```python
+merge_combo = QComboBox()
+merge_combo.addItems(['over', 'plus', 'multiply', 'screen', 'under', 'NOUVELLE_OP'])
+```
+
+### Changement colorspace par défaut
+
+**Fichier:** `SlapCompCore.py` ligne ~1310
+
+```python
+root['colorManagement'].setValue('ACES')
+root['workingSpaceLUT'].setValue('ACES - ACEScg')
+root['int8LUT'].setValue('Utility - sRGB - Texture')
+```
+
+### Module reload sans redémarrer Deadline
+
+**Déjà implémenté** dans `slapIt.py`:
+```python
+import importlib
+importlib.reload(SlapCompCore)
+importlib.reload(SlapCompUI_Qt)
+```
+
+---
+
+## 11. TESTS ET VALIDATION
+
+### Test checklist
+
+- [ ] Job individuel → Détection layers
+- [ ] Batch jobs → Grouping correct
+- [ ] Job completed ancien → Affiche 100% (filesystem check)
+- [ ] Auto-increment version (v001 → v002)
+- [ ] Noms fichiers SANS projet
+- [ ] Nom job Deadline AVEC projet
+- [ ] Dependencies (job pending si source incomplete)
+- [ ] Preset application (ordre + exclusion)
+- [ ] Node graph layout (pas de overlap)
+- [ ] Multiple merge operations
+
+### Logs importants à surveiller
+
+```
+=== get_output_dirs: START ===
+  Prism info extracted from filesystem path     ← Succès parsing Prism
+  Final completion: 80/80 frames = 100%         ← Complétion correcte
+  Jobs marked as Completed but 0/77...          ← Filesystem fallback activé
+
+=== group_output_info_for_ui: START ===
+  Found X unique layers                         ← Agrégation OK
+
+Génération script Nuke...
+  Script Nuke écrit: .../SlapComp/SEQ_SHOT_SlapComp_v001.nk
+  Job soumis avec succès: job_id=...
+```
+
+---
+
+## 12. RÉFÉRENCES RAPIDES
+
+### Patterns regex Prism
+
+```python
+# Filesystem path
+r'[\\/](\w+)[\\/]03_Production[\\/]Shots[\\/]([A-Z0-9_]+)[\\/]([A-Z0-9_]+)[\\/]'
+
+# Job name
+r'^([^_]+(?:_[^_]+)*)_([A-Z0-9]+)-([A-Z0-9]+)_'
+```
+
+### Frame padding Nuke
+
+```python
+# Input filesystem: file.0001.exr
+# Nuke pattern: file.####.exr
+# Ou avec padding custom: file.%04d.exr
+```
+
+### Job states Deadline
+
+- `Active` : En cours de render
+- `Completed` : Terminé avec succès
+- `Failed` : Erreurs
+- `Pending` : En attente (dependencies)
+- `Suspended` : Mis en pause
+
+---
+
+**FIN DE DOCUMENTATION**
+
+Pour questions ou bugs: Pipeline Team
+Dernière mise à jour: Décembre 2025
