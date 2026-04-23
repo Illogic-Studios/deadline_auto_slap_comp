@@ -11,6 +11,8 @@ from __future__ import absolute_import
 
 import os
 import sys
+import importlib
+
 from Deadline.Scripting import ClientUtils, MonitorUtils, RepositoryUtils
 
 # Ajoute le chemin du dossier General pour importer SlapCompCore
@@ -21,12 +23,9 @@ if general_scripts_path not in sys.path:
 
 # Import du module commun
 import SlapCompCore
-if 'SlapCompCore' in sys.modules:
-    if sys.version_info[0] >= 3:
-        import importlib
-        importlib.reload(SlapCompCore)
-    else:
-        reload(SlapCompCore)
+
+if "SlapCompCore" in sys.modules:
+    importlib.reload(SlapCompCore)
 
 
 def __main__():
@@ -77,7 +76,9 @@ def __main__():
         return
 
     # === AUTOMATION: Sélection automatique des dernières versions complètes ===
-    ClientUtils.LogText("\n=== Selection automatique des dernieres versions completes ===")
+    ClientUtils.LogText(
+        "\n=== Selection automatique des dernieres versions completes ==="
+    )
     output_info = SlapCompCore.select_latest_complete_versions(output_info)
 
     if len(output_info) == 0:
@@ -88,9 +89,9 @@ def __main__():
     ClientUtils.LogText("\n=== Application des presets ===")
     # Extrait project/sequence/shot du premier item
     first_info = output_info[0]
-    project = first_info.get('project', '')
-    sequence = first_info.get('sequence', '')
-    shot = first_info.get('shot', '')
+    project = first_info.get("project", "")
+    sequence = first_info.get("sequence", "")
+    shot = first_info.get("shot", "")
 
     # Charge et applique le preset
     preset_data = SlapCompCore.load_preset(project, sequence, shot)
@@ -98,8 +99,8 @@ def __main__():
         ordered_output_info = SlapCompCore.apply_preset_data(output_info, preset_data)
         ClientUtils.LogText("\nOrdre des layers applique depuis preset:")
         for idx, info in enumerate(ordered_output_info):
-            layer_name = info.get('layer_name', 'Unknown')
-            merge_op = info.get('merge_operation', 'over')
+            layer_name = info.get("layer_name", "Unknown")
+            merge_op = info.get("merge_operation", "over")
             ClientUtils.LogText(f"  [{idx}] {layer_name} (merge: {merge_op})")
     else:
         ordered_output_info = output_info
@@ -107,7 +108,7 @@ def __main__():
 
     # Ajoute les index de compositing
     for idx, item in enumerate(ordered_output_info):
-        item['compositing_index'] = idx
+        item["compositing_index"] = idx
 
     # === AUTOMATION: Soumission automatique à Deadline ===
     ClientUtils.LogText("\n=== Soumission automatique a Deadline ===")
@@ -115,9 +116,13 @@ def __main__():
 
     ClientUtils.LogText("\nOrdre final:")
     for item in ordered_output_info:
-        layer_name = item.get('layer_name', os.path.basename(item.get('directory', 'Unknown')))
-        merge_op = item.get('merge_operation', 'over')
-        ClientUtils.LogText(f"  [{item['compositing_index']}] {layer_name} (merge: {merge_op})")
+        layer_name = item.get(
+            "layer_name", os.path.basename(item.get("directory", "Unknown"))
+        )
+        merge_op = item.get("merge_operation", "over")
+        ClientUtils.LogText(
+            f"  [{item['compositing_index']}] {layer_name} (merge: {merge_op})"
+        )
 
     ClientUtils.LogText(f"\nMode de rendu: Soumettre a Deadline")
 

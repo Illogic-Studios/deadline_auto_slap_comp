@@ -10,6 +10,8 @@ from __future__ import absolute_import
 
 import os
 import sys
+import importlib
+
 from Deadline.Scripting import ClientUtils, MonitorUtils, RepositoryUtils
 
 # Ajoute le chemin du dossier General pour importer les modules
@@ -20,21 +22,16 @@ if general_scripts_path not in sys.path:
 
 # Import du module commun
 import SlapCompCore
-if 'SlapCompCore' in sys.modules:
-    if sys.version_info[0] >= 3:
-        import importlib
-        importlib.reload(SlapCompCore)
-    else:
-        reload(SlapCompCore)
+
+if "SlapCompCore" in sys.modules:
+    importlib.reload(SlapCompCore)
 
 # Import de l'UI Qt
 import SlapCompUI_Qt
-if 'SlapCompUI_Qt' in sys.modules:
-    if sys.version_info[0] >= 3:
-        import importlib
-        importlib.reload(SlapCompUI_Qt)
-    else:
-        reload(SlapCompUI_Qt)
+
+if "SlapCompUI_Qt" in sys.modules:
+    importlib.reload(SlapCompUI_Qt)
+
 from SlapCompUI_Qt import show_slap_comp_dialog
 
 
@@ -91,17 +88,23 @@ def __main__():
 
             ClientUtils.LogText("\nOrdre valide:")
             for item in ordered_output_info:
-                layer_name = item.get('layer_name', os.path.basename(item.get('directory', 'Unknown')))
-                merge_op = item.get('merge_operation', 'over')
-                ClientUtils.LogText(f"  [{item['compositing_index']}] {layer_name} (merge: {merge_op})")
+                layer_name = item.get(
+                    "layer_name", os.path.basename(item.get("directory", "Unknown"))
+                )
+                merge_op = item.get("merge_operation", "over")
+                ClientUtils.LogText(
+                    f"  [{item['compositing_index']}] {layer_name} (merge: {merge_op})"
+                )
 
             # Affiche le mode de rendu choisi
             render_mode_labels = {
                 "none": "Ne pas lancer le rendu",
                 "local": "Rendu local (ligne de commande)",
-                "deadline": "Soumettre à Deadline"
+                "deadline": "Soumettre à Deadline",
             }
-            ClientUtils.LogText(f"Mode de rendu: {render_mode_labels.get(render_mode, render_mode)}")
+            ClientUtils.LogText(
+                f"Mode de rendu: {render_mode_labels.get(render_mode, render_mode)}"
+            )
 
             # Appelle le script Nuke
             SlapCompCore.call_nuke_script(ordered_output_info, render_mode)
