@@ -23,17 +23,41 @@ import SlapCompCore
 
 # Imports Qt (compatible PySide2 et PyQt5)
 try:
-    from PySide2.QtWidgets import (QApplication, QDialog, QVBoxLayout, QHBoxLayout,
-                                   QTableWidget, QTableWidgetItem, QPushButton,
-                                   QLabel, QCheckBox, QComboBox, QHeaderView,
-                                   QAbstractItemView, QWidget, QMessageBox)
+    from PySide2.QtWidgets import (
+        QApplication,
+        QDialog,
+        QVBoxLayout,
+        QHBoxLayout,
+        QTableWidget,
+        QTableWidgetItem,
+        QPushButton,
+        QLabel,
+        QCheckBox,
+        QComboBox,
+        QHeaderView,
+        QAbstractItemView,
+        QWidget,
+        QMessageBox,
+    )
     from PySide2.QtCore import Qt
     from PySide2.QtGui import QColor
 except ImportError:
-    from PyQt5.QtWidgets import (QApplication, QDialog, QVBoxLayout, QHBoxLayout,
-                                 QTableWidget, QTableWidgetItem, QPushButton,
-                                 QLabel, QCheckBox, QComboBox, QHeaderView,
-                                 QAbstractItemView, QWidget, QMessageBox)
+    from PyQt5.QtWidgets import (
+        QApplication,
+        QDialog,
+        QVBoxLayout,
+        QHBoxLayout,
+        QTableWidget,
+        QTableWidgetItem,
+        QPushButton,
+        QLabel,
+        QCheckBox,
+        QComboBox,
+        QHeaderView,
+        QAbstractItemView,
+        QWidget,
+        QMessageBox,
+    )
     from PyQt5.QtCore import Qt
     from PyQt5.QtGui import QColor
 
@@ -66,9 +90,9 @@ class SlapCompDialog(QDialog):
         self.shot = ""
         if output_info and len(output_info) > 0:
             first_info = output_info[0]
-            self.project = first_info.get('project', '')
-            self.sequence = first_info.get('sequence', '')
-            self.shot = first_info.get('shot', '')
+            self.project = first_info.get("project", "")
+            self.sequence = first_info.get("sequence", "")
+            self.shot = first_info.get("shot", "")
 
         self.setup_ui()
         self.populate_table()
@@ -82,9 +106,9 @@ class SlapCompDialog(QDialog):
         title = "Slap Comp - Configuration"
         if self.output_info and len(self.output_info) > 0:
             first_info = self.output_info[0]
-            project = first_info.get('project', '')
-            sequence = first_info.get('sequence', '')
-            shot = first_info.get('shot', '')
+            project = first_info.get("project", "")
+            sequence = first_info.get("sequence", "")
+            shot = first_info.get("shot", "")
             if project and sequence and shot:
                 title = f"Slap Comp - {project}_{sequence}_{shot}"
 
@@ -95,20 +119,26 @@ class SlapCompDialog(QDialog):
         main_layout = QVBoxLayout(self)
 
         # Labels d'instructions
-        info_label = QLabel("Sélectionnez une ligne et utilisez les boutons pour réordonner les layers:")
+        info_label = QLabel(
+            "Sélectionnez une ligne et utilisez les boutons pour réordonner les layers:"
+        )
         info_label.setStyleSheet("font-weight: bold; font-size: 11pt; padding: 5px;")
         main_layout.addWidget(info_label)
 
-        order_label = QLabel("Layers empilés du haut (background) vers le bas (foreground)")
-        order_label.setStyleSheet("font-style: italic; font-size: 10pt; padding: 2px 5px; color: #666;")
+        order_label = QLabel(
+            "Layers empilés du haut (background) vers le bas (foreground)"
+        )
+        order_label.setStyleSheet(
+            "font-style: italic; font-size: 10pt; padding: 2px 5px; color: #666;"
+        )
         main_layout.addWidget(order_label)
 
         # Table
         self.table = QTableWidget()
         self.table.setColumnCount(6)
-        self.table.setHorizontalHeaderLabels([
-            "Include", "Source", "Layer", "Version", "Status", "Merge Op"
-        ])
+        self.table.setHorizontalHeaderLabels(
+            ["Include", "Source", "Layer", "Version", "Status", "Merge Op"]
+        )
 
         # Configuration de la sélection
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -118,9 +148,9 @@ class SlapCompDialog(QDialog):
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeToContents)  # Include
         header.setSectionResizeMode(1, QHeaderView.ResizeToContents)  # Source
-        header.setSectionResizeMode(2, QHeaderView.Stretch)           # Layer
+        header.setSectionResizeMode(2, QHeaderView.Stretch)  # Layer
         header.setSectionResizeMode(3, QHeaderView.ResizeToContents)  # Version
-        header.setSectionResizeMode(4, QHeaderView.Stretch)           # Status
+        header.setSectionResizeMode(4, QHeaderView.Stretch)  # Status
         header.setSectionResizeMode(5, QHeaderView.ResizeToContents)  # Merge Op
 
         self.table.verticalHeader().setVisible(True)
@@ -163,11 +193,13 @@ class SlapCompDialog(QDialog):
         render_layout.addWidget(render_label)
 
         self.render_combo = QComboBox()
-        self.render_combo.addItems([
-            "Ne pas lancer le rendu",
-            "Rendu local (ligne de commande)",
-            "Soumettre à Deadline"
-        ])
+        self.render_combo.addItems(
+            [
+                "Ne pas lancer le rendu",
+                "Rendu local (ligne de commande)",
+                "Soumettre à Deadline",
+            ]
+        )
         render_layout.addWidget(self.render_combo)
         render_layout.addStretch()
 
@@ -208,47 +240,51 @@ class SlapCompDialog(QDialog):
         include_layout.setAlignment(Qt.AlignCenter)
 
         include_check = QCheckBox()
-        include_check.setChecked(info.get('included', True))
+        include_check.setChecked(info.get("included", True))
         include_check.stateChanged.connect(self.on_data_changed)
         include_layout.addWidget(include_check)
 
         self.table.setCellWidget(row_idx, 0, include_widget)
 
         # Colonne 1: Source (Deadline ou Filesystem)
-        source = info.get('source', 'deadline')
-        source_label = "Deadline" if source == 'deadline' else "Filesystem"
+        source = info.get("source", "deadline")
+        source_label = "Deadline" if source == "deadline" else "Filesystem"
         source_item = QTableWidgetItem(source_label)
         source_item.setFlags(source_item.flags() & ~Qt.ItemIsEditable)
         self.table.setItem(row_idx, 1, source_item)
 
         # Colonne 2: Layer name
-        layer_name = info.get('layer_name', f'Layer{row_idx}')
+        layer_name = info.get("layer_name", f"Layer{row_idx}")
         layer_item = QTableWidgetItem(layer_name)
         layer_item.setFlags(layer_item.flags() & ~Qt.ItemIsEditable)
         self.table.setItem(row_idx, 2, layer_item)
 
         # Colonne 3: Version combo
-        if 'versions' in info:
-            versions = info['versions']
+        if "versions" in info:
+            versions = info["versions"]
             version_combo = QComboBox()
 
             version_labels = []
             for v in versions:
-                completion = v['completion_percent']
+                completion = v["completion_percent"]
                 status_icon = "✓" if completion == 100 else "⚠"
-                version_labels.append(f"{v['version']} - {completion:.0f}% {status_icon}")
+                version_labels.append(
+                    f"{v['version']} - {completion:.0f}% {status_icon}"
+                )
 
             version_combo.addItems(version_labels)
 
-            selected_idx = info.get('selected_version_index', len(versions) - 1)
+            selected_idx = info.get("selected_version_index", len(versions) - 1)
             version_combo.setCurrentIndex(selected_idx)
-            version_combo.currentIndexChanged.connect(lambda idx, row=row_idx: self.on_version_changed(row, idx))
+            version_combo.currentIndexChanged.connect(
+                lambda idx, row=row_idx: self.on_version_changed(row, idx)
+            )
 
             self.table.setCellWidget(row_idx, 3, version_combo)
 
             # Colonne 4: Status avec couleur
             selected_version = versions[selected_idx]
-            completion = selected_version['completion_percent']
+            completion = selected_version["completion_percent"]
             status_text = f"{selected_version['status']} ({selected_version['frames_completed']}/{selected_version['frames_total']} frames)"
 
             status_item = QTableWidgetItem(status_text)
@@ -269,7 +305,7 @@ class SlapCompDialog(QDialog):
         merge_combo = QComboBox()
         merge_combo.addItems(["over", "plus"])
 
-        default_merge_op = info.get('merge_operation', 'over')
+        default_merge_op = info.get("merge_operation", "over")
         merge_combo.setCurrentText(default_merge_op)
         merge_combo.currentTextChanged.connect(self.on_data_changed)
 
@@ -279,9 +315,9 @@ class SlapCompDialog(QDialog):
         """Callback quand une version est changée."""
         # Met à jour le status
         info = self.get_row_info(row)
-        if 'versions' in info and version_idx < len(info['versions']):
-            selected_version = info['versions'][version_idx]
-            completion = selected_version['completion_percent']
+        if "versions" in info and version_idx < len(info["versions"]):
+            selected_version = info["versions"][version_idx]
+            completion = selected_version["completion_percent"]
             status_text = f"{selected_version['status']} ({selected_version['frames_completed']}/{selected_version['frames_total']} frames)"
 
             status_item = QTableWidgetItem(status_text)
@@ -301,7 +337,7 @@ class SlapCompDialog(QDialog):
         if layer_item:
             layer_name = layer_item.text()
             for info in self.output_info:
-                if info.get('layer_name', '') == layer_name:
+                if info.get("layer_name", "") == layer_name:
                     return info
         return {}
 
@@ -314,8 +350,10 @@ class SlapCompDialog(QDialog):
 
         # Échange dans output_info
         new_row = current_row - 1
-        self.output_info[current_row], self.output_info[new_row] = \
-            self.output_info[new_row], self.output_info[current_row]
+        self.output_info[current_row], self.output_info[new_row] = (
+            self.output_info[new_row],
+            self.output_info[current_row],
+        )
 
         # Reconstruit la table
         self.rebuild_table()
@@ -334,8 +372,10 @@ class SlapCompDialog(QDialog):
 
         # Échange dans output_info
         new_row = current_row + 1
-        self.output_info[current_row], self.output_info[new_row] = \
-            self.output_info[new_row], self.output_info[current_row]
+        self.output_info[current_row], self.output_info[new_row] = (
+            self.output_info[new_row],
+            self.output_info[current_row],
+        )
 
         # Reconstruit la table
         self.rebuild_table()
@@ -376,13 +416,10 @@ class SlapCompDialog(QDialog):
                 merge_combo = self.table.cellWidget(row_idx, 5)
                 if merge_combo and isinstance(merge_combo, QComboBox):
                     merge_op = merge_combo.currentText()
-                    if merge_op != 'over':  # Enregistre seulement les non-default
+                    if merge_op != "over":  # Enregistre seulement les non-default
                         default_merge_ops[layer_name] = merge_op
 
-        return {
-            'layer_order': layer_order,
-            'default_merge_ops': default_merge_ops
-        }
+        return {"layer_order": layer_order, "default_merge_ops": default_merge_ops}
 
     def load_and_apply_preset(self):
         """Charge et applique automatiquement le preset au démarrage."""
@@ -411,7 +448,9 @@ class SlapCompDialog(QDialog):
             try:
                 os.makedirs(preset_dir)
             except Exception as e:
-                QMessageBox.critical(self, "Erreur", f"Impossible de créer le répertoire:\n{str(e)}")
+                QMessageBox.critical(
+                    self, "Erreur", f"Impossible de créer le répertoire:\n{str(e)}"
+                )
                 return
 
         # Crée un message box personnalisé avec boutons clairs
@@ -420,7 +459,9 @@ class SlapCompDialog(QDialog):
         msg_box.setText("Choisissez où sauvegarder le preset:")
 
         # Boutons personnalisés
-        project_button = msg_box.addButton("Save Project Preset", QMessageBox.AcceptRole)
+        project_button = msg_box.addButton(
+            "Save Project Preset", QMessageBox.AcceptRole
+        )
         shot_button = msg_box.addButton("Save Shot Preset", QMessageBox.AcceptRole)
         cancel_button = msg_box.addButton("Cancel", QMessageBox.RejectRole)
 
@@ -439,20 +480,30 @@ class SlapCompDialog(QDialog):
             if clicked_button == project_button:  # Project
                 result = SlapCompCore.save_preset_project(self.project, preset_data)
                 if result:
-                    QMessageBox.information(self, "Succès", f"Preset projet sauvegardé:\n{result}")
+                    QMessageBox.information(
+                        self, "Succès", f"Preset projet sauvegardé:\n{result}"
+                    )
                 else:
-                    QMessageBox.critical(self, "Erreur", "Erreur lors de la sauvegarde du preset projet")
+                    QMessageBox.critical(
+                        self, "Erreur", "Erreur lors de la sauvegarde du preset projet"
+                    )
 
             elif clicked_button == shot_button:  # Shot
                 if not self.shot:
                     QMessageBox.warning(self, "Erreur", "Aucun shot détecté")
                     return
 
-                shot_key = SlapCompCore.save_preset_shot(self.project, self.sequence, self.shot, preset_data)
+                shot_key = SlapCompCore.save_preset_shot(
+                    self.project, self.sequence, self.shot, preset_data
+                )
                 if shot_key:
-                    QMessageBox.information(self, "Succès", f"Preset shot sauvegardé pour: {shot_key}")
+                    QMessageBox.information(
+                        self, "Succès", f"Preset shot sauvegardé pour: {shot_key}"
+                    )
                 else:
-                    QMessageBox.critical(self, "Erreur", "Erreur lors de la sauvegarde du preset shot")
+                    QMessageBox.critical(
+                        self, "Erreur", "Erreur lors de la sauvegarde du preset shot"
+                    )
 
         except Exception as e:
             QMessageBox.critical(self, "Erreur", f"Erreur sauvegarde preset:\n{str(e)}")
@@ -503,11 +554,11 @@ class SlapCompDialog(QDialog):
                 continue
 
             # Récupère la version sélectionnée
-            if 'versions' in info:
+            if "versions" in info:
                 version_combo = self.table.cellWidget(row_idx, 3)
                 if version_combo and isinstance(version_combo, QComboBox):
                     version_idx = version_combo.currentIndex()
-                    selected_version = info['versions'][version_idx]
+                    selected_version = info["versions"][version_idx]
 
                     # Récupère le merge operation
                     merge_combo = self.table.cellWidget(row_idx, 5)
@@ -516,24 +567,26 @@ class SlapCompDialog(QDialog):
                         merge_operation = merge_combo.currentText()
 
                     # Construit le nom du layer pour job_name
-                    layer_name = info.get('layer_name', 'Unknown')
+                    layer_name = info.get("layer_name", "Unknown")
                     job_name = f"{layer_name}_{selected_version['version']}"
 
-                    result.append({
-                        'directory': selected_version['directory'],
-                        'pattern': selected_version.get('pattern', ''),
-                        'first_frame': selected_version['first_frame'],
-                        'last_frame': selected_version['last_frame'],
-                        'layer_name': layer_name,
-                        'compositing_index': len(result),
-                        'version': selected_version['version'],
-                        'merge_operation': merge_operation,
-                        'project': info.get('project', ''),
-                        'sequence': info.get('sequence', ''),
-                        'shot': info.get('shot', ''),
-                        'job_id': selected_version.get('job_id'),
-                        'job_ids': selected_version.get('job_ids', [])
-                    })
+                    result.append(
+                        {
+                            "directory": selected_version["directory"],
+                            "pattern": selected_version.get("pattern", ""),
+                            "first_frame": selected_version["first_frame"],
+                            "last_frame": selected_version["last_frame"],
+                            "layer_name": layer_name,
+                            "compositing_index": len(result),
+                            "version": selected_version["version"],
+                            "merge_operation": merge_operation,
+                            "project": info.get("project", ""),
+                            "sequence": info.get("sequence", ""),
+                            "shot": info.get("shot", ""),
+                            "job_id": selected_version.get("job_id"),
+                            "job_ids": selected_version.get("job_ids", []),
+                        }
+                    )
             else:
                 # Fallback ancienne structure
                 merge_combo = self.table.cellWidget(row_idx, 5)
@@ -541,17 +594,19 @@ class SlapCompDialog(QDialog):
                 if merge_combo and isinstance(merge_combo, QComboBox):
                     merge_operation = merge_combo.currentText()
 
-                result.append({
-                    'directory': info['directory'],
-                    'filename_pattern': info['filename_pattern'],
-                    'first_frame': info['first_frame'],
-                    'last_frame': info['last_frame'],
-                    'job_name': info.get('job_name', ''),
-                    'compositing_index': len(result),
-                    'job_id': info.get('job_id'),
-                    'job_ids': info.get('job_ids', [info.get('job_id')]),
-                    'merge_operation': merge_operation
-                })
+                result.append(
+                    {
+                        "directory": info["directory"],
+                        "filename_pattern": info["filename_pattern"],
+                        "first_frame": info["first_frame"],
+                        "last_frame": info["last_frame"],
+                        "job_name": info.get("job_name", ""),
+                        "compositing_index": len(result),
+                        "job_id": info.get("job_id"),
+                        "job_ids": info.get("job_ids", [info.get("job_id")]),
+                        "merge_operation": merge_operation,
+                    }
+                )
 
         return (result, render_mode)
 
