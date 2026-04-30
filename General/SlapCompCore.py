@@ -2026,6 +2026,6 @@ def get_deadline_user_short():
         parts = full_name.split(".")
         addLog(f"Parts: {parts}")
         if len(parts) >= 2:
-            return (parts[0][0] + parts[-1][0]).lower()  # e.g., "sm" for "Sarah Munos"
+            return (parts[0][0] + parts[-1][0]).lower()  # e.g., "am" for "Andrew Mansour"
         else:
-            return full_name[:3].lower()  # e.g., "sar" for "Sarah"
+            return full_name[:3].lower()  # e.g., "and" for "Andrew"
