@@ -22,9 +22,8 @@ import subprocess
 import tempfile
 import json
 import datetime
-import inspect
 import configparser
-from Deadline.Scripting import ClientUtils, RepositoryUtils
+from Deadline.Scripting import ClientUtils, RepositoryUtils # type: ignore
 
 
 # ============================================================================
@@ -603,7 +602,7 @@ def scan_prism_render_layers(project_root, sequence, shot, max_total_frames):
         addLog(f"    scan_prism_render_layers: Directory NOT FOUND: {render_base}")
         return []
 
-    addLog(f"    scan_prism_render_layers: Directory exists, listing contents...")
+    addLog("    scan_prism_render_layers: Directory exists, listing contents...")
 
     layers = []
 
@@ -948,12 +947,12 @@ def find_next_slapcomp_version(scenefile_dir, render_filename):
     Returns:
         int: Prochain numéro de version (ex: 1, 2, 3...)
     """
-    addLog(f"\n=== find_next_slapcomp_version: START ===")
+    addLog("\n=== find_next_slapcomp_version: START ===")
     addLog(f"Scenefile dir: {scenefile_dir}")
     addLog(f"Render filename base: {render_filename}")
 
     if not os.path.isdir(scenefile_dir):
-        addLog(f"Directory does not exist, returning version 1")
+        addLog("Directory does not exist, returning version 1")
         return 1
 
     existing_files = os.listdir(scenefile_dir)
@@ -976,7 +975,7 @@ def find_next_slapcomp_version(scenefile_dir, render_filename):
 
     next_version = max_version + 1
     addLog(f"Max version found: {max_version}, returning next version: {next_version}")
-    addLog(f"=== find_next_slapcomp_version: END ===\n")
+    addLog("=== find_next_slapcomp_version: END ===\n")
 
     return next_version
 
@@ -1406,7 +1405,7 @@ def submit_to_deadline(
         sys.path.insert(0, submission_path)
 
     try:
-        from SubmitSlapCompToDeadline import submit_slap_comp_job
+        from SubmitSlapCompToDeadline import submit_slap_comp_job # type: ignore
 
         # Collecte les job IDs pour les dépendances
         dependency_job_ids = []
@@ -1690,7 +1689,7 @@ print("Slap comp created successfully: {output_nk}")
         # Supprime le script temporaire
         try:
             os.unlink(temp_script_path)
-        except:
+        except Exception:
             pass
 
         if process.returncode == 0:
@@ -2072,3 +2071,93 @@ def get_deadline_user_short():
             return (parts[0][0] + parts[-1][0]).lower()  # e.g., "am" for "Andrew Mansour"
         else:
             return full_name[:3].lower()  # e.g., "and" for "Andrew"
+
+# ============================================================================
+# SECTION 9: Run functions
+# ============================================================================
+
+def autoSlapIt(selected_jobs: list):
+
+    processed_slaps = []
+
+    for i, job in enumerate(selected_jobs):
+        addLog(f"\n{'=' * 60}")
+        addLog(f"Processing job number : {i + 1}\n{job.JobName}")
+        addLog(f"{'=' * 60}")
+
+        jobs_to_process = []
+        processed_batches = set()
+
+        batch_name = job.JobBatchName
+
+        if batch_name and batch_name not in processed_batches:
+            batch_jobs = get_job_batch(batch_name)
+            # addLog(f"Detected {len(batch_jobs)} job(s) in the batch")
+            jobs_to_process.extend(batch_jobs)
+            processed_batches.add(batch_name)
+        elif not batch_name:
+            jobs_to_process.append(job)
+
+        output_info = get_output_dirs(jobs_to_process)
+        # addLog(f"\n{len(output_info)} sequence(s) trouvee(s)")
+        if len(output_info) == 0:
+            addLog("Aucune sequence trouvee")
+            continue
+
+        addLog(
+            "\n=== Selection automatique des dernieres versions completes ==="
+        )
+        output_info = select_latest_complete_versions(output_info)
+        if len(output_info) == 0:
+            addLog("Erreur: aucune version selectionnee")
+            continue
+
+        # === AUTOMATION: Application automatique des presets ===
+        addLog("\n=== Application des presets ===")
+        # Extrait project/sequence/shot du premier item
+        first_info = output_info[0]
+        project = first_info.get("project", "")
+        sequence = first_info.get("sequence", "")
+        shot = first_info.get("shot", "")
+
+        slap_name = "_".join([project, shot, sequence])
+        if slap_name in processed_slaps:
+            continue
+        processed_slaps.append(slap_name)
+
+        # Charge et applique le preset
+        preset_data = load_preset(project, sequence, shot)
+        if preset_data:
+            ordered_output_info = apply_preset_data(
+                output_info, preset_data
+            )
+            addLog("\nOrdre des layers applique depuis preset:")
+            for idx, info in enumerate(ordered_output_info):
+                layer_name = info.get("layer_name", "Unknown")
+                merge_op = info.get("merge_operation", "over")
+                addLog(f"  [{idx}] {layer_name} (merge: {merge_op})")
+        else:
+            # ordered_output_info = output_info
+            addLog("Preset not found -- SKIPPING SLAPCOMP")
+            continue
+
+        # Ajoute les index de compositing
+        for idx, item in enumerate(ordered_output_info):
+            item["compositing_index"] = idx
+
+        # === AUTOMATION: Soumission automatique à Deadline ===
+        addLog("\n=== Soumission automatique a Deadline ===")
+        render_mode = "deadline"  # Force le mode Deadline
+
+        addLog("\nOrdre final:")
+        for item in ordered_output_info:
+            layer_name = item.get(
+                "layer_name", os.path.basename(item.get("directory", "Unknown"))
+            )
+            merge_op = item.get("merge_operation", "over")
+            addLog(
+                f"  [{item['compositing_index']}] {layer_name} (merge: {merge_op})"
+            )
+
+        call_nuke_script(ordered_output_info, render_mode)
+        addLog(f"SlapComp submitted for {job.JobName}\n")
