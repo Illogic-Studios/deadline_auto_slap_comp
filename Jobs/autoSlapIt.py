@@ -27,22 +27,9 @@ import slapcomp  # type: ignore  # noqa: E402
 if "slapcomp" in sys.modules:
     importlib.reload(slapcomp)
 
-
-def get_selected_jobs():
-    selected_jobs = []
-
-    selected_jobs = MonitorUtils.GetSelectedJobs()
-
-    if not selected_jobs:
-        ClientUtils.LogText("Aucun job ou batch selectionne")
-        return
-
-    return selected_jobs
-
-
 def __main__():
 
-    selected_jobs = get_selected_jobs()
+    selected_jobs = slapcomp.get_selected_jobs()
     slapcomp.auto_slap(selected_jobs)
 
 

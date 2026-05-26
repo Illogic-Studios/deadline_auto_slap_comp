@@ -23,7 +23,7 @@ import tempfile
 import json
 import datetime
 import configparser
-from Deadline.Scripting import ClientUtils, RepositoryUtils  # type: ignore
+from Deadline.Scripting import ClientUtils, RepositoryUtils, MonitorUtils  # type: ignore
 
 
 # ============================================================================
@@ -2084,6 +2084,17 @@ def get_deadline_user_short():
 # ============================================================================
 # SECTION 9: Run functions
 # ============================================================================
+
+def get_selected_jobs():
+    selected_jobs = []
+
+    selected_jobs = MonitorUtils.GetSelectedJobs()
+
+    if not selected_jobs:
+        ClientUtils.LogText("Aucun job ou batch selectionne")
+        return
+
+    return selected_jobs
 
 
 def autoSlapIt(selected_jobs: list, save_log=True):
