@@ -581,7 +581,7 @@ def detect_department(shot_path):
     return "Compo"
 
 
-def scan_prism_render_layers(project_root, sequence, shot):
+def scan_prism_render_layers(project_root, sequence, shot, max_total_frames):
     """
     Scanne l'arborescence Prism 3dRender pour trouver tous les render layers disponibles.
 
@@ -655,6 +655,10 @@ def scan_prism_render_layers(project_root, sequence, shot):
             seq_info = detect_image_sequence_info(version_path)
 
             if seq_info:
+                # Check if deadline job exists
+                project = extract_project_name(project_root)
+                layer_job_ids = find_deadline_job(project, sequence, shot, layer_name, version_num)
+
                 # Si la séquence est dans un sous-dossier, utilise le chemin complet
                 actual_directory = version_path
                 if "subfolder" in seq_info:
@@ -663,21 +667,37 @@ def scan_prism_render_layers(project_root, sequence, shot):
                         f"          Images found in subfolder: {seq_info['subfolder']}"
                     )
 
-                layers.append(
-                    {
-                        "layer_name": layer_name,
-                        "version": version_num,
-                        "directory": normalize_path_for_nuke(actual_directory),
-                        "pattern": seq_info["pattern"],
-                        "first_frame": seq_info["first_frame"],
-                        "last_frame": seq_info["last_frame"],
-                        "total_frames": seq_info["total_frames"],
-                        "completion": 100,  # Assume 100% pour scans filesystem
-                        "project": extract_project_name(project_root),
-                        "sequence": sequence,
-                        "shot": shot,
-                    }
-                )
+                layer_dict = {
+                    "layer_name": layer_name,
+                    "version": version_num,
+                    "directory": normalize_path_for_nuke(actual_directory),
+                    "pattern": seq_info["pattern"],
+                    "first_frame": seq_info["first_frame"],
+                    "last_frame": seq_info["last_frame"],
+                    "total_frames": seq_info["total_frames"],
+                    "completion": 100,  # Assume 100% pour scans filesystem
+                    "project": project,
+                    "sequence": sequence,
+                    "shot": shot,
+                }
+                
+                # if we found deadline jobs, update its deps and completion
+                if layer_job_ids:
+                    layer_dict["job_ids"] = layer_job_ids
+                    
+                    layer_jobs = RepositoryUtils.GetJobs(layer_job_ids, True) 
+
+                    completion = get_combined_job_completion(layer_jobs)
+                    addLog(f"DEBUGDEBUG: completion {completion}")
+                    first_frame, last_frame = get_combined_frame_range(layer_jobs)
+
+                    layer_dict["total_frames"] = completion["total_frames"]
+                    layer_dict["first_frame"] = first_frame
+                    layer_dict["last_frame"] = last_frame
+
+                    addLog(f"DEBUGDEBUG: layer dict {layer_dict}")
+
+                layers.append(layer_dict)
                 addLog(
                     f"          Added: {layer_name} v{version_num:03d} ({seq_info['total_frames']} frames)"
                 )
@@ -688,6 +708,27 @@ def scan_prism_render_layers(project_root, sequence, shot):
 
     addLog(f"    scan_prism_render_layers: Total layers found: {len(layers)}")
     return layers
+
+
+def find_deadline_job(project, sequence, shot, layer_name, version_num):
+    addLog(f"Frame number not matched, checking deadline job {layer_name}")
+
+    dependencies = []
+
+    jobs = RepositoryUtils.GetJobs(True)
+
+    # for the jobname from available info
+    version_str = f"v{version_num:03d}"
+    sequence_shot = "-".join([sequence,shot])
+    job_name = "_".join([project, sequence_shot, layer_name, version_str])
+
+    for job in jobs: 
+        if job_name in job.JobName:
+            if job.JobComment == "Prism-Submission-Python": 
+                addLog(f"DEBUG: job match {job.JobName}")
+                dependencies.append(job.JobId)
+    
+    return dependencies
 
 
 def build_prism_slapcomp_paths(
@@ -1114,10 +1155,12 @@ def get_output_dirs(jobs_to_process, filter_qc_layers=True):
 
     filesystem_count = 0
 
+    max_total_frames = completion_info["total_frames"]
+
     for context_key, prism_info in prism_contexts.items():
         project_root, sequence, shot = context_key
         addLog(f"  Scanning: {project_root}/{sequence}/{shot}")
-        filesystem_layers = scan_prism_render_layers(project_root, sequence, shot)
+        filesystem_layers = scan_prism_render_layers(project_root, sequence, shot, max_total_frames)
 
         for fs_layer in filesystem_layers:
             # Vérifie si cette version existe déjà dans output_info
@@ -2026,6 +2069,6 @@ def get_deadline_user_short():
         parts = full_name.split(".")
         addLog(f"Parts: {parts}")
         if len(parts) >= 2:
-            return (parts[0][0] + parts[-1][0]).lower()  # e.g., "sm" for "Sarah Munos"
+            return (parts[0][0] + parts[-1][0]).lower()  # e.g., "am" for "Andrew Mansour"
         else:
-            return full_name[:3].lower()  # e.g., "sar" for "Sarah"
+            return full_name[:3].lower()  # e.g., "and" for "Andrew"
