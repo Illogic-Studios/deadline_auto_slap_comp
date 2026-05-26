@@ -23,7 +23,7 @@ import tempfile
 import json
 import datetime
 import configparser
-from Deadline.Scripting import ClientUtils, RepositoryUtils # type: ignore
+from Deadline.Scripting import ClientUtils, RepositoryUtils  # type: ignore
 
 
 # ============================================================================
@@ -55,34 +55,36 @@ def normalize_path_for_nuke(path):
         return path.replace("\\", "/")
     return path
 
+
 def get_file_path_from_config(attr_name):
     current_directory = os.path.dirname(os.path.abspath(__file__))
     config_file = os.path.join(current_directory, "path_config.ini")
 
     config = configparser.ConfigParser()
-    try: 
+    try:
         config.read(config_file)
         file_path = config.get("DEFAULT", attr_name)
-    except Exception:    
+    except Exception:
         file_path = None
         print(f"{attr_name} COULD NOT BE ACCESSED OR {config_file} WAS NOT FOUND")
-    
+
     return file_path
 
-def addLog(message):
+
+def addLog(message="", write=True):
     """Add log message to both console and file only when called from NightAutoSlapComp.py"""
 
     ClientUtils.LogText(message)
 
-    # check call stack for NightAutoSlapComp.py
-
-    log_dir = get_file_path_from_config("LOG_DIR")
-    if not log_dir: 
+    if not write:
         return
 
-    filename = "SlapDependencyDebug" + datetime.datetime.now().strftime(
-        "%Y%m%d"
-    )
+    # check call stack for NightAutoSlapComp.py
+    log_dir = get_file_path_from_config("LOG_DIR")
+    if not log_dir:
+        return
+
+    filename = "SlapDependencyDebug" + datetime.datetime.now().strftime("%Y%m%d")
     log_file = os.path.join(log_dir, filename + ".log")
 
     if not os.path.exists(log_dir):
@@ -656,7 +658,9 @@ def scan_prism_render_layers(project_root, sequence, shot, max_total_frames):
             if seq_info:
                 # Check if deadline job exists
                 project = extract_project_name(project_root)
-                layer_job_ids = find_deadline_job(project, sequence, shot, layer_name, version_num)
+                layer_job_ids = find_deadline_job(
+                    project, sequence, shot, layer_name, version_num
+                )
 
                 # Si la séquence est dans un sous-dossier, utilise le chemin complet
                 actual_directory = version_path
@@ -679,12 +683,12 @@ def scan_prism_render_layers(project_root, sequence, shot, max_total_frames):
                     "sequence": sequence,
                     "shot": shot,
                 }
-                
+
                 # if we found deadline jobs, update its deps and completion
                 if layer_job_ids:
                     layer_dict["job_ids"] = layer_job_ids
-                    
-                    layer_jobs = RepositoryUtils.GetJobs(layer_job_ids, True) 
+
+                    layer_jobs = RepositoryUtils.GetJobs(layer_job_ids, True)
 
                     completion = get_combined_job_completion(layer_jobs)
                     addLog(f"DEBUGDEBUG: completion {completion}")
@@ -718,15 +722,15 @@ def find_deadline_job(project, sequence, shot, layer_name, version_num):
 
     # for the jobname from available info
     version_str = f"v{version_num:03d}"
-    sequence_shot = "-".join([sequence,shot])
+    sequence_shot = "-".join([sequence, shot])
     job_name = "_".join([project, sequence_shot, layer_name, version_str])
 
-    for job in jobs: 
+    for job in jobs:
         if job_name in job.JobName:
-            if job.JobComment == "Prism-Submission-Python": 
+            if job.JobComment == "Prism-Submission-Python":
                 addLog(f"DEBUG: job match {job.JobName}")
                 dependencies.append(job.JobId)
-    
+
     return dependencies
 
 
@@ -1159,7 +1163,9 @@ def get_output_dirs(jobs_to_process, filter_qc_layers=True):
     for context_key, prism_info in prism_contexts.items():
         project_root, sequence, shot = context_key
         addLog(f"  Scanning: {project_root}/{sequence}/{shot}")
-        filesystem_layers = scan_prism_render_layers(project_root, sequence, shot, max_total_frames)
+        filesystem_layers = scan_prism_render_layers(
+            project_root, sequence, shot, max_total_frames
+        )
 
         for fs_layer in filesystem_layers:
             # Vérifie si cette version existe déjà dans output_info
@@ -1405,7 +1411,7 @@ def submit_to_deadline(
         sys.path.insert(0, submission_path)
 
     try:
-        from SubmitSlapCompToDeadline import submit_slap_comp_job # type: ignore
+        from SubmitSlapCompToDeadline import submit_slap_comp_job  # type: ignore
 
         # Collecte les job IDs pour les dépendances
         dependency_job_ids = []
@@ -2068,22 +2074,26 @@ def get_deadline_user_short():
         parts = full_name.split(".")
         addLog(f"Parts: {parts}")
         if len(parts) >= 2:
-            return (parts[0][0] + parts[-1][0]).lower()  # e.g., "am" for "Andrew Mansour"
+            return (
+                parts[0][0] + parts[-1][0]
+            ).lower()  # e.g., "am" for "Andrew Mansour"
         else:
             return full_name[:3].lower()  # e.g., "and" for "Andrew"
+
 
 # ============================================================================
 # SECTION 9: Run functions
 # ============================================================================
 
-def autoSlapIt(selected_jobs: list):
+
+def autoSlapIt(selected_jobs: list, save_log=True):
 
     processed_slaps = []
 
     for i, job in enumerate(selected_jobs):
-        addLog(f"\n{'=' * 60}")
-        addLog(f"Processing job number : {i + 1}\n{job.JobName}")
-        addLog(f"{'=' * 60}")
+        addLog(f"\n{'=' * 60}", save_log)
+        addLog(f"Processing job number : {i + 1}\n{job.JobName}", save_log)
+        addLog(f"{'=' * 60}", save_log)
 
         jobs_to_process = []
         processed_batches = set()
@@ -2101,19 +2111,19 @@ def autoSlapIt(selected_jobs: list):
         output_info = get_output_dirs(jobs_to_process)
         # addLog(f"\n{len(output_info)} sequence(s) trouvee(s)")
         if len(output_info) == 0:
-            addLog("Aucune sequence trouvee")
+            addLog("Aucune sequence trouvee", save_log)
             continue
 
         addLog(
-            "\n=== Selection automatique des dernieres versions completes ==="
+            "\n=== Selection automatique des dernieres versions completes ===", save_log
         )
         output_info = select_latest_complete_versions(output_info)
         if len(output_info) == 0:
-            addLog("Erreur: aucune version selectionnee")
+            addLog("Erreur: aucune version selectionnee", save_log)
             continue
 
         # === AUTOMATION: Application automatique des presets ===
-        addLog("\n=== Application des presets ===")
+        addLog("\n=== Application des presets ===", save_log)
         # Extrait project/sequence/shot du premier item
         first_info = output_info[0]
         project = first_info.get("project", "")
@@ -2128,17 +2138,15 @@ def autoSlapIt(selected_jobs: list):
         # Charge et applique le preset
         preset_data = load_preset(project, sequence, shot)
         if preset_data:
-            ordered_output_info = apply_preset_data(
-                output_info, preset_data
-            )
-            addLog("\nOrdre des layers applique depuis preset:")
+            ordered_output_info = apply_preset_data(output_info, preset_data)
+            addLog("\nOrdre des layers applique depuis preset:", save_log)
             for idx, info in enumerate(ordered_output_info):
                 layer_name = info.get("layer_name", "Unknown")
                 merge_op = info.get("merge_operation", "over")
-                addLog(f"  [{idx}] {layer_name} (merge: {merge_op})")
+                addLog(f"  [{idx}] {layer_name} (merge: {merge_op})", save_log)
         else:
             # ordered_output_info = output_info
-            addLog("Preset not found -- SKIPPING SLAPCOMP")
+            addLog("Preset not found -- SKIPPING SLAPCOMP", save_log)
             continue
 
         # Ajoute les index de compositing
@@ -2146,18 +2154,19 @@ def autoSlapIt(selected_jobs: list):
             item["compositing_index"] = idx
 
         # === AUTOMATION: Soumission automatique à Deadline ===
-        addLog("\n=== Soumission automatique a Deadline ===")
+        addLog("\n=== Soumission automatique a Deadline ===", save_log)
         render_mode = "deadline"  # Force le mode Deadline
 
-        addLog("\nOrdre final:")
+        addLog("\nOrdre final:", save_log)
         for item in ordered_output_info:
             layer_name = item.get(
                 "layer_name", os.path.basename(item.get("directory", "Unknown"))
             )
             merge_op = item.get("merge_operation", "over")
             addLog(
-                f"  [{item['compositing_index']}] {layer_name} (merge: {merge_op})"
+                f"  [{item['compositing_index']}] {layer_name} (merge: {merge_op})",
+                save_log,
             )
 
         call_nuke_script(ordered_output_info, render_mode)
-        addLog(f"SlapComp submitted for {job.JobName}\n")
+        addLog(f"SlapComp submitted for {job.JobName}\n", save_log)

@@ -1,6 +1,6 @@
-from Deadline.Scripting import RepositoryUtils # type: ignore
-from Deadline import Jobs # type: ignore
-from System import DateTime # type: ignore
+from Deadline.Scripting import RepositoryUtils  # type: ignore
+from Deadline import Jobs  # type: ignore
+from System import DateTime  # type: ignore
 
 import sys
 import os
@@ -14,15 +14,14 @@ if general_scripts_path not in sys.path:
     sys.path.insert(0, general_scripts_path)
 
 # Import du module commun
-import slapcomp
+import slapcomp  # noqa: E402
 
 if "slapcomp" in sys.modules:
     importlib.reload(slapcomp)
 
+
 class NightSlap:
     def __init__(self):
-
-        print("Initialize the tong")
 
         self.config_file = self.getConfigFile()
 
@@ -66,9 +65,7 @@ class NightSlap:
         else:
             min_date = DateTime(today.Year, today.Month, today.Day, self.min_time, 0, 0)
 
-        slapcomp.add_log(
-            f"Checking min datetime: {min_date}, max datetime: {max_date}"
-        )
+        slapcomp.add_log(f"Checking min datetime: {min_date}, max datetime: {max_date}")
         return min_date, max_date
 
     def betweenDates(self, submit_date_time: DateTime):
