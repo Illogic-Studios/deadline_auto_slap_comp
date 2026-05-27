@@ -25,17 +25,6 @@ import datetime
 import configparser
 from Deadline.Scripting import ClientUtils, RepositoryUtils, MonitorUtils  # type: ignore
 
-
-# ============================================================================
-# NOTES DE DÉVELOPPEMENT
-# ============================================================================
-# Si support Houdini/Husk ajouté à l'avenir, implémenter convert_padding_to_nuke()
-# pour convertir patterns $F4 (Houdini) et %04d (Maya) vers format Nuke (####).
-# Actuellement, tous les patterns sont générés automatiquement en format Nuke
-# par detect_image_sequence_info() qui scanne le filesystem.
-# ============================================================================
-
-
 # ============================================================================
 # SECTION 1: UTILITIES (NUKE)
 # ============================================================================
@@ -67,7 +56,6 @@ def get_file_path_from_config(attr_name):
         file_path = config.get("DEFAULT", attr_name)
     except Exception:
         file_path = None
-        print(f"{attr_name} COULD NOT BE ACCESSED OR {config_file} WAS NOT FOUND")
 
     return file_path
 
@@ -160,59 +148,55 @@ def remove_suffix(job_name):
 
 def group_high_prio_and_render_jobs(jobs):
     """
-    Groupe les jobs _high_prio_render et _render qui correspondent à la même version.
-    Puis cherche TOUTES les versions disponibles dans Deadline pour chaque layer.
+    Groups high_prio_render and _render jobs, then finds all available versions for each layer.
 
     Args:
-        jobs (list): Liste de jobs Deadline
+        jobs (list): Deadline job list
 
     Returns:
-        dict: Mapping (base_name, version) -> liste de jobs associés
-              base_name = nom du layer sans version ni suffixe render
+        dict: Mapping (base_name, version) -> associated job list
+              base_name = layer name vithout version or suffix
     """
     if not jobs:
         return {}
 
-    # Étape 1: Extraire les base_names uniques des jobs sélectionnés
+    # Extract unique base_names of selected jobs
     base_names_set = set()
 
     for job in jobs:
         job_name = job.JobName
 
-        # Retire les suffixes
         clean_name = remove_suffix(job_name)
 
-        # Extrait base_name
+        # Extact base_name
         version_match = re.search(r"(.+?)_v(\d+)$", clean_name)
         if version_match:
             base_name = version_match.group(1)
             base_names_set.add(base_name)
 
     if not base_names_set:
-        addLog("  Aucun base_name trouvé avec pattern _v###")
+        addLog("\tNo base name found with pattern _v###")
         return {}
 
-    addLog(f"  Base names trouvés: {len(base_names_set)}")
+    addLog(f"\tBase names found: {len(base_names_set)}")
     for bn in base_names_set:
         addLog(f"    - {bn}")
 
-    # Étape 2: Pour chaque base_name, chercher TOUTES les versions dans Deadline
-    addLog("  Recherche de TOUTES les versions dans Deadline...")
-    all_jobs = RepositoryUtils.GetJobs(True)  # True = include completed
+    # For each base name, find ALL versions in deadline
+    addLog("\tSearching for ALL versions in Deadline...")
+    all_jobs = RepositoryUtils.GetJobs(True)
 
     final_grouped = {}
 
     for base_name in base_names_set:
-        # Trouve TOUTES les versions de ce base_name
         matching_versions = {}
 
         for job in all_jobs:
             job_name = job.JobName
 
-            # Retire les suffixes
             clean_name = remove_suffix(job_name)
 
-            # Vérifie si ce job matche notre base_name
+            # Verify matching names
             version_match = re.search(r"(.+?)_v(\d+)$", clean_name)
 
             if version_match:
@@ -220,35 +204,35 @@ def group_high_prio_and_render_jobs(jobs):
                 job_version = int(version_match.group(2))
 
                 if job_base_name == base_name:
-                    # Ce job correspond!
                     version_key = (base_name, job_version)
                     if version_key not in matching_versions:
                         matching_versions[version_key] = []
                     matching_versions[version_key].append(job)
 
         addLog(
-            f"    Base '{base_name}': {len(matching_versions)} version(s) trouvée(s)"
+            f"\t\tBase '{base_name}': {len(matching_versions)} version(s) trouvée(s)"
         )
         for (bn, ver), jobs_list in sorted(
             matching_versions.items(), key=lambda x: x[0][1]
         ):
-            addLog(f"      - v{ver:03d} ({len(jobs_list)} job(s))")
+            addLog(f"\t\t- v{ver:03d} ({len(jobs_list)} job(s))")
 
-        # Ajoute toutes les versions trouvées
         final_grouped.update(matching_versions)
 
     return final_grouped
+
 
 def get_combined_frame_range(jobs):
     frames = [f for job in jobs for f in (job.JobFramesList or [])]
     return (min(frames), max(frames)) if frames else (1, 1)
 
+
 def get_combined_job_completion(jobs):
     """
-    Calcule la complétion combinée de plusieurs jobs (high_prio + render).
+    Get combined completion of multiple jobs (high_prio + render)
 
     Args:
-        jobs (list): Liste de jobs Deadline associés
+        jobs (list): list of Deadline jobs
 
     Returns:
         dict: {
@@ -267,12 +251,12 @@ def get_combined_job_completion(jobs):
         frames_list = job.JobFramesList
         completed_list = job.JobCompletedTasks
 
-        # Count total frames (JobFramesList est un tableau d'entiers)
+        # Count total frames
         job_frames = 0
         if frames_list:
             job_frames = len(list(frames_list))
 
-        # Count completed frames (JobCompletedTasks est un tableau d'entiers)
+        # Count completed frames
         job_completed = 0
         if completed_list:
             job_completed = len(list(completed_list))
@@ -286,29 +270,27 @@ def get_combined_job_completion(jobs):
         if job_completed < job_frames:
             all_completed = False
 
-    # FILESYSTEM VERIFICATION FALLBACK
-    # Si les jobs sont "Completed" mais qu'on a 0 completed frames, vérifier le disque
+    # Fallback: if jobs "Completed" but no completed frames, check disk
     if (
         total_completed == 0
         and total_frames > 0
         and all([job.JobStatus == "Completed" for job in jobs])
     ):
         addLog(
-            f"  Jobs marked as Completed but 0/{total_frames} frames reported, checking filesystem..."
+            f"\tJobs marked as Completed but 0/{total_frames} frames reported, checking filesystem..."
         )
 
-        # Reset totals - on va utiliser les chiffres du filesystem
+        # Reset totals
         total_frames = 0
         total_completed = 0
 
         for job in jobs:
-            # Extraire le répertoire de sortie
             output_dirs = job.JobOutputDirectories
             if output_dirs and len(output_dirs) > 0:
                 output_dir = output_dirs[0]
                 addLog(f"  Checking directory: {output_dir}")
 
-                # Utiliser detect_image_sequence_info pour scanner le disque
+                # Scan disc
                 seq_info = detect_image_sequence_info(output_dir)
 
                 if seq_info and seq_info.get("total_frames", 0) > 0:
@@ -351,11 +333,10 @@ def get_combined_job_completion(jobs):
 
 def detect_image_sequence_info(directory):
     """
-    Détecte les informations d'une séquence d'images (pattern, first/last frame, total).
-    Cherche d'abord directement dans le dossier, puis dans les sous-dossiers.
+    Checks dir, and its subdir for image sequence info
 
     Args:
-        directory (str): Dossier contenant la séquence
+        directory (str): Dir containing image sequence
 
     Returns:
         dict: {
@@ -364,16 +345,16 @@ def detect_image_sequence_info(directory):
             'last_frame': int,
             'total_frames': int,
             'subfolder': str (optional)
-        } ou None si aucune séquence détectée
+        } or None if no sequence found
     """
     if not os.path.isdir(directory):
         return None
 
-    # Pattern pour détecter les numéros de frame (ex: beauty.0001.exr)
+    # Pattern to get frame number
     frame_pattern = re.compile(r"(.+?)\.(\d{4,})\.exr$", re.IGNORECASE)
 
     def find_sequences_in_folder(folder_path):
-        """Helper: cherche les séquences .exr dans un dossier donné."""
+        """Helper: find .exr sequences in folder"""
         try:
             files = os.listdir(folder_path)
         except (OSError, IOError):
@@ -395,24 +376,23 @@ def detect_image_sequence_info(directory):
 
         return sequences
 
-    # Étape 1: Chercher directement dans le dossier version
+    # Find in dir
     sequences = find_sequences_in_folder(directory)
     subfolder_name = None
 
-    # Étape 2: Si rien trouvé, chercher dans les sous-dossiers
+    # If not found, find in subfolder
     if not sequences:
         try:
             items = os.listdir(directory)
             subdirs = [d for d in items if os.path.isdir(os.path.join(directory, d))]
 
-            # Cherche dans chaque sous-dossier
             all_subfolder_sequences = {}
             for subdir in subdirs:
                 subdir_path = os.path.join(directory, subdir)
                 subdir_sequences = find_sequences_in_folder(subdir_path)
 
                 if subdir_sequences:
-                    # Trouve la séquence avec le plus de frames dans ce sous-dossier
+                    # Find sequence with the most frames
                     main_seq = max(
                         subdir_sequences.items(), key=lambda x: len(x[1]["frames"])
                     )
@@ -423,7 +403,6 @@ def detect_image_sequence_info(directory):
                         "frame_count": frame_count,
                     }
 
-            # Prend le sous-dossier avec le plus de frames
             if all_subfolder_sequences:
                 best_subfolder = max(
                     all_subfolder_sequences.items(), key=lambda x: x[1]["frame_count"]
@@ -432,13 +411,8 @@ def detect_image_sequence_info(directory):
                 sequences = best_subfolder[1]["sequences"]
 
         except (OSError, IOError):
-            pass
+            return None
 
-    # Si toujours rien trouvé, retourne None
-    if not sequences:
-        return None
-
-    # Trouve la séquence avec le plus de frames
     main_sequence = max(sequences.items(), key=lambda x: len(x[1]["frames"]))
     base_name, seq_info = main_sequence
 
@@ -465,13 +439,10 @@ def detect_image_sequence_info(directory):
 
 def extract_prism_from_filesystem_path(output_dir):
     """
-    Extrait les informations Prism depuis un CHEMIN COMPLET de filesystem.
-    UTILISER EN PRIORITÉ car rapide et fiable (1 seul pattern regex).
-
-    Use case: Quand vous avez un path de dossier de rendu existant.
+    Extract Prism information from a complete path.
 
     Args:
-        output_dir (str): Chemin complet (ex: "I:/PROJECT/03_Production/Shots/CAPS02/SH0230/Renders/...")
+        output_dir (str): Complete path (ex: "I:/PROJECT/03_Production/Shots/CAPS02/SH0230/Renders/...")
 
     Returns:
         dict: {
@@ -481,15 +452,12 @@ def extract_prism_from_filesystem_path(output_dir):
             'sequence': str,           # Ex: "CAPS02"
             'shot': str,               # Ex: "SH0230"
             'shot_path': str          # Ex: "I:/PROJECT/03_Production/Shots/CAPS02/SH0230"
-        } ou None si structure non reconnue
+        } or None if unrecognized structure
 
-    Example:
-        >>> extract_prism_from_filesystem_path("I:/MyProject/03_Production/Shots/SEQ01/SH0010/Renders/beauty")
-        {'project': 'MyProject', 'sequence': 'SEQ01', 'shot': 'SH0010', ...}
     """
     normalized = output_dir.replace("\\", "/")
 
-    # Pattern Prism: I:/PROJECT/03_Production/Shots/SEQUENCE/SHOT/...
+    # Prism Pattern: I:/PROJECT/03_Production/Shots/SEQUENCE/SHOT/...
     match = re.search(
         r"([A-Z]:)/([^/]+)/03_Production/Shots/([^/]+)/([^/]+)",
         normalized,
@@ -518,19 +486,10 @@ def extract_prism_from_filesystem_path(output_dir):
 
 
 def extract_project_name(project_root):
-    """
-    Extrait le nom du projet depuis project_root.
-
-    Args:
-        project_root (str): Chemin racine du projet (ex: I:/PROJECT)
-
-    Returns:
-        str: Nom du projet ou 'Unknown'
-    """
     if not project_root:
         return "Unknown"
 
-    # Prend le dernier segment du path
+    # Takes last segment of path (i.e. I:/PROJECT => PROJECT)
     normalized = project_root.replace("\\", "/")
     parts = [p for p in normalized.split("/") if p]
 
@@ -539,13 +498,13 @@ def extract_project_name(project_root):
 
 def detect_department(shot_path):
     """
-    Détecte le nom du département de compositing (Comp, Compo, 2D, etc.).
+    Detect compositing department name (Comp, Comp, 2D, etc.).
 
     Args:
-        shot_path (str): Chemin du shot dans Prism
+        shot_path (str): Prism shot path
 
     Returns:
-        str: Nom du département trouvé ou 'Compo' par défaut
+        str: Dept name, "Compo" by default
     """
     if not os.path.isdir(shot_path):
         return "Compo"
@@ -564,54 +523,50 @@ def detect_department(shot_path):
 
 def scan_prism_render_layers(project_root, sequence, shot, max_total_frames):
     """
-    Scanne l'arborescence Prism 3dRender pour trouver tous les render layers disponibles.
+    Scan 3dRender Prism structure for all available render layers
 
     Args:
-        project_root (str): Racine du projet
-        sequence (str): Nom de la séquence
-        shot (str): Nom du shot
+        project_root (str)
+        sequence (str): Sequence name
+        shot (str): Shot name
 
     Returns:
-        list: Liste de dicts avec infos sur chaque layer trouvé
+        list: List of dictionary with all found layers and their info
     """
     render_base = (
         f"{project_root}/03_Production/Shots/{sequence}/{shot}/Renders/3dRender"
     )
 
-    addLog(f"    scan_prism_render_layers: Checking path: {render_base}")
-
     if not os.path.isdir(render_base):
-        addLog(f"    scan_prism_render_layers: Directory NOT FOUND: {render_base}")
+        addLog(f"\tscan_prism_render_layers: Directory NOT FOUND: {render_base}")
         return []
 
-    addLog("    scan_prism_render_layers: Directory exists, listing contents...")
+    addLog(f"\tscan_prism_render_layers: scanning {render_base}, listing contents...")
 
     layers = []
 
-    # Parcourt les dossiers de layers
+    # Parse layer directories
     try:
         layer_folders = os.listdir(render_base)
         addLog(
-            f"    scan_prism_render_layers: Found {len(layer_folders)} items in {render_base}"
+            f"\tscan_prism_render_layers: Found {len(layer_folders)} items in {render_base}"
         )
     except Exception as e:
-        addLog(f"    scan_prism_render_layers: ERROR listing directory: {str(e)}")
+        addLog(f"\tscan_prism_render_layers: ERROR listing directory: {str(e)}")
         return []
 
     for layer_name in layer_folders:
         layer_path = os.path.join(render_base, layer_name)
 
         if not os.path.isdir(layer_path):
-            addLog(f"      Skipping '{layer_name}' (not a directory)")
+            addLog(f"\t\tSkipping '{layer_name}' (not a directory)")
             continue
 
-        addLog(f"      Processing layer: {layer_name}")
+        addLog(f"\t\tProcessing layer: {layer_name}")
 
-        # Cherche les versions
+        # Search for versions TODO: Make this a function and reuse
         version_folders_list = os.listdir(layer_path)
-        addLog(
-            f"        Found {len(version_folders_list)} version folders in {layer_name}"
-        )
+        addLog(f"\t\tFound {len(version_folders_list)} version folders in {layer_name}")
 
         for version_folder in version_folders_list:
             version_path = os.path.join(layer_path, version_folder)
@@ -619,20 +574,20 @@ def scan_prism_render_layers(project_root, sequence, shot, max_total_frames):
             if not os.path.isdir(version_path):
                 continue
 
-            # Extrait le numéro de version (accepte v1, v01, v001, v0001, etc.)
+            # Extract version number (accepte v1, v01, v001, v0001, etc.)
             version_match = re.match(r"v(\d+)", version_folder)
             if not version_match:
                 addLog(
-                    f"          Skipping '{version_folder}' (version pattern not matched)"
+                    f"\t\t\tSkipping '{version_folder}' (version pattern not matched)"
                 )
                 continue
 
             version_num = int(version_match.group(1))
             addLog(
-                f"          Found version: v{version_num:03d} in folder '{version_folder}'"
+                f"\t\t\tFound version: v{version_num:03d} in folder '{version_folder}'"
             )
 
-            # Détecte la séquence d'images
+            # Detect image sequence
             seq_info = detect_image_sequence_info(version_path)
 
             if seq_info:
@@ -642,13 +597,11 @@ def scan_prism_render_layers(project_root, sequence, shot, max_total_frames):
                     project, sequence, shot, layer_name, version_num
                 )
 
-                # Si la séquence est dans un sous-dossier, utilise le chemin complet
+                # If sequence in subdir, use full path
                 actual_directory = version_path
                 if "subfolder" in seq_info:
                     actual_directory = os.path.join(version_path, seq_info["subfolder"])
-                    addLog(
-                        f"          Images found in subfolder: {seq_info['subfolder']}"
-                    )
+                    addLog(f"\t\t\tImages found in subfolder: {seq_info['subfolder']}")
 
                 layer_dict = {
                     "layer_name": layer_name,
@@ -658,7 +611,7 @@ def scan_prism_render_layers(project_root, sequence, shot, max_total_frames):
                     "first_frame": seq_info["first_frame"],
                     "last_frame": seq_info["last_frame"],
                     "total_frames": seq_info["total_frames"],
-                    "completion": 100,  # Assume 100% pour scans filesystem
+                    "completion": 100,  # Assume 100% for filesystem scans
                     "project": project,
                     "sequence": sequence,
                     "shot": shot,
@@ -682,14 +635,12 @@ def scan_prism_render_layers(project_root, sequence, shot, max_total_frames):
 
                 layers.append(layer_dict)
                 addLog(
-                    f"          Added: {layer_name} v{version_num:03d} ({seq_info['total_frames']} frames)"
+                    f"\t\t\tAdded: {layer_name} v{version_num:03d} ({seq_info['total_frames']} frames)"
                 )
             else:
-                addLog(
-                    f"          Skipping v{version_num:03d} (no image sequence found)"
-                )
+                addLog(f"\t\t\tSkipping v{version_num:03d} (no image sequence found)")
 
-    addLog(f"    scan_prism_render_layers: Total layers found: {len(layers)}")
+    addLog(f"\tscan_prism_render_layers: Total layers found: {len(layers)}")
     return layers
 
 
@@ -718,15 +669,15 @@ def build_prism_slapcomp_paths(
     shot_path, project, sequence, shot, department, version_number
 ):
     """
-    Construit les chemins Prism pour le slap comp.
+    Builds Prism paths for the slap comps
 
     Args:
-        shot_path (str): Chemin du shot
-        project (str): Nom du projet (utilisé pour job_name seulement)
-        sequence (str): Nom de la séquence
-        shot (str): Nom du shot
-        department (str): Nom du département
-        version_number (int): Numéro de version
+        shot_path (str): Shot path
+        project (str): Project name (used for job_name)
+        sequence (str): Sequence name
+        shot (str): Shot name
+        department (str): Dept name
+        version_number (int): version number
 
     Returns:
         dict: {
@@ -739,11 +690,8 @@ def build_prism_slapcomp_paths(
     """
     version_str = f"v{version_number:03d}"
 
-    # Nom de fichier SANS project (pour .nk et renders)
     base_name = f"{sequence}_{shot}_SlapComp_{version_str}"
-
-    # Job name AVEC project (pour Deadline seulement)
-    job_name = f"{project}_{sequence}_{shot}_SlapComp_{version_str}"
+    job_name = f"{project}_{base_name}"
 
     # Scenefile paths
     scenefile_dir = f"{shot_path}/Scenefiles/{department}/SlapComp"
@@ -764,13 +712,9 @@ def build_prism_slapcomp_paths(
 
 def extract_prism_from_job_name(job):
     """
-    Extrait les informations Prism depuis les MÉTADONNÉES d'un job Deadline (JobName/BatchName).
-    UTILISER EN FALLBACK si extract_prism_from_filesystem_path() échoue.
-
-    Use case: Quand le path n'existe pas ou ne suit pas la structure Prism exacte.
-
-    Plus robuste (7 patterns) mais plus lent et peut créer faux positifs.
-    Utilise des patterns GÉNÉRIQUES qui ne dépendent pas de noms de séquences spécifiques.
+    FALLBACK METHOD to extract Prism information using Deadline job metadata.
+    Use case: When extract_prism_from_filesystem_path() fails.
+    More robust, but much slower and more generic, leading to potential false positives.
 
     Args:
         job: Job Deadline avec JobName et JobBatchName
@@ -789,19 +733,19 @@ def extract_prism_from_job_name(job):
         >>> extract_prism_from_job_name(job)
         {'project': 'PROJECT', 'sequence': 'CAPS02', 'shot': 'SH0230', ...}
     """
-    # Patterns pour extraire sequence/shot (ordre de priorité)
+    # Patterns to extract sequence/shot
     seq_shot_patterns = [
-        # 1. Format standard: LETTRES##-LETTRES## ou LETTRES##_LETTRES##
+        # 1. standard format: LETTRES##-LETTRES## ou LETTRES##_LETTRES##
         (r"([A-Z]+\d+)[-_]([A-Z]+\d+)", "direct_match"),
-        # 2. Dans un chemin /Shots/SEQ/SHOT/
+        # 2. In a path structured as: /Shots/SEQ/SHOT/
         (r"/Shots/([^/]+)/([^/]+)/", "path_based"),
-        # 3. Entre underscores: _SEQ##-SHOT##_
+        # 3. Between underscores: _SEQ##-SHOT##_
         (r"_([A-Z]+\d+)[-_]([A-Z]+\d+)_", "mid_string"),
-        # 4. N'importe où dans la chaîne (plus permissif)
+        # 4. Anywhere
         (r"([A-Z]{1,10}\d+)[-_]([A-Z]{1,10}\d+)", "anywhere"),
     ]
 
-    # Essayer d'extraire depuis le job name
+    # Try to extract via job name
     job_name = job.JobName
 
     sequence = None
@@ -818,7 +762,7 @@ def extract_prism_from_job_name(job):
             )
             break
 
-    # Si échec, essayer le batch name
+    # else, try batch name
     if not sequence or not shot:
         batch_name = job.JobBatchName
         if batch_name:
@@ -835,8 +779,7 @@ def extract_prism_from_job_name(job):
     if not sequence or not shot:
         return None
 
-    # Extraire le nom du projet (tout ce qui est avant la sequence)
-    # Pattern: cherche PROJECT_SEQ ou PROJECT/SEQ
+    # Get project name
     project_patterns = [
         # 1. Underscore separator: PROJECT_SEQ##
         rf"(.+?)_+{re.escape(sequence)}",
@@ -850,12 +793,12 @@ def extract_prism_from_job_name(job):
         match = re.search(pattern, job_name, re.IGNORECASE)
         if match:
             project = match.group(1).strip("_/\\")
-            # Nettoie le nom du projet (enlève séparateurs multiples, etc.)
+            # Clean project name
             project = re.sub(r"[_/\\]+$", "", project)
             addLog(f"  Extracted project from job name: {project}")
             break
 
-    # Si pas de projet trouvé, essayer batch name
+    # If no project, try batch
     if not project:
         batch_name = job.JobBatchName
         if batch_name:
@@ -867,12 +810,12 @@ def extract_prism_from_job_name(job):
                     addLog(f"  Extracted project from batch name: {project}")
                     break
 
-    # Si toujours pas de projet, utiliser un nom par défaut
+    # FALLBACK use default name
     if not project:
         project = "UnknownProject"
         addLog(f"  Could not extract project name, using default: {project}")
 
-    # Construire les paths Prism (assume I:/ par défaut)
+    # Build prism path (assumes I:/)
     project_root = f"I:/{project}"
     shot_path = f"{project_root}/03_Production/Shots/{sequence}/{shot}"
 
@@ -887,11 +830,7 @@ def extract_prism_from_job_name(job):
 
 def get_prism_info_smart(job, output_dirs=None):
     """
-    Extrait intelligemment les infos Prism en essayant plusieurs stratégies.
-
-    Stratégie (ordre de priorité):
-    1. Depuis filesystem path (rapide, fiable) si output_dirs fourni
-    2. Depuis job metadata (fallback robuste)
+    Extract Prism data using multiple methods
 
     Args:
         job: Job Deadline
@@ -899,20 +838,15 @@ def get_prism_info_smart(job, output_dirs=None):
 
     Returns:
         dict: Informations Prism ou None si extraction impossible
-
-    Example:
-        >>> prism_info = get_prism_info_smart(job, output_dirs=["/path/to/renders"])
     """
     prism_info = None
 
-    # Stratégie 1: Essayer filesystem path (simple et rapide)
     if output_dirs and len(output_dirs) > 0:
         prism_info = extract_prism_from_filesystem_path(output_dirs[0])
         if prism_info:
             addLog("  Prism info extracted from filesystem path")
             return prism_info
 
-    # Stratégie 2: Fallback sur job metadata (robuste mais plus lent)
     prism_info = extract_prism_from_job_name(job)
     if prism_info:
         addLog("  Prism info extracted from job metadata (fallback)")
@@ -922,40 +856,33 @@ def get_prism_info_smart(job, output_dirs=None):
 
 def find_next_slapcomp_version(scenefile_dir, render_filename):
     """
-    Trouve le prochain numéro de version disponible pour un slap comp.
+    Find the next available version number for the slap comp
 
     Args:
-        scenefile_dir (str): Dossier des scenefiles
-        render_filename (str): Base du nom de fichier
+        scenefile_dir (str): Scenefile directory
+        render_filename (str): File basename
 
     Returns:
-        int: Prochain numéro de version (ex: 1, 2, 3...)
+        int: next version number (ex: 1, 2, 3...)
     """
     addLog("\n=== find_next_slapcomp_version: START ===")
-    addLog(f"Scenefile dir: {scenefile_dir}")
-    addLog(f"Render filename base: {render_filename}")
 
     if not os.path.isdir(scenefile_dir):
         addLog("Directory does not exist, returning version 1")
         return 1
 
     existing_files = os.listdir(scenefile_dir)
-    addLog(f"Found {len(existing_files)} files in directory")
 
     max_version = 0
     pattern = re.compile(rf"{re.escape(render_filename)}_v(\d{{3,4}})\.nk$")
-    addLog(f"Pattern to match: {pattern.pattern}")
 
     for filename in existing_files:
         match = pattern.search(
             filename
-        )  # Changed from .match() to .search() for robustness
+        ) 
         if match:
             version = int(match.group(1))
-            addLog(f"  Matched file: {filename} -> version {version}")
             max_version = max(max_version, version)
-        else:
-            addLog(f"  Skipped file: {filename} (no match)")
 
     next_version = max_version + 1
     addLog(f"Max version found: {max_version}, returning next version: {next_version}")
@@ -968,10 +895,11 @@ def find_next_slapcomp_version(scenefile_dir, render_filename):
 # SECTION 5: OUTPUT COLLECTION
 # ============================================================================
 
-def collect_prism_contexts(grouped_jobs):    # PASSE 1
+
+def collect_prism_contexts(grouped_jobs):  # PASSE 1
     prism_contexts = {}  # Dict: {(project_root, sequence, shot): prism_info_dict}
 
-    addLog("\n--- PASSE 1: Collecte des contextes Prism ---")
+    addLog("\n--- PASSE 1: Collect Prism context ---")
 
     for (base_name, version), associated_jobs in grouped_jobs.items():
         job = associated_jobs[0]
@@ -988,24 +916,19 @@ def collect_prism_contexts(grouped_jobs):    # PASSE 1
                 prism_info["shot"],
             )
             prism_contexts[context_key] = prism_info
-            addLog(
-                f"  Contexte ajouté: {prism_info['project']}/{prism_info['sequence']}/{prism_info['shot']}"
-            )
 
-    addLog(f"Total contextes Prism: {len(prism_contexts)}")
+    addLog(f"Total Prism contexts found : {len(prism_contexts)}")
     return prism_contexts
 
-def collect_deadline_layers(grouped_jobs):   # PASSE 2
+
+def collect_deadline_layers(grouped_jobs):  # PASSE 2
 
     output_info = []
 
-    addLog(f"Jobs groupés: {len(grouped_jobs)} groupes (toutes versions)")
+    addLog(f"Grouped {len(grouped_jobs)} jobs")
 
     for (base_name, version), associated_jobs in grouped_jobs.items():
         job = associated_jobs[0]
-
-        addLog(f"Associated jobs : {associated_jobs}")
-        addLog(f"First Job: {job.JobName}")
 
         output_dirs = job.JobOutputDirectories
 
@@ -1015,18 +938,17 @@ def collect_deadline_layers(grouped_jobs):   # PASSE 2
 
         output_dir = output_dirs[0]
 
-        # Extrait le nom du layer depuis base_name avec PATTERNS GÉNÉRIQUES
-        layer_name = os.path.basename(output_dir)  # Fallback par défaut
+        # Extract layer from basename using generic patterns
+        layer_name = os.path.basename(output_dir) 
 
-        # PATTERNS GÉNÉRIQUES pour extraire layer name (pas de "CAPS" en dur!)
         layer_patterns = [
-            # 1. Format complet: PROJECT_SEQ##-SHOT##_LAYER
+            # 1. Complete format: PROJECT_SEQ##-SHOT##_LAYER
             (r"(.+?)_([A-Z]+\d+)[-_]([A-Z]+\d+)_(.+)", 4),
-            # 2. Format court: SEQ##-SHOT##_LAYER
+            # 2. Short format: SEQ##-SHOT##_LAYER
             (r"^([A-Z]+\d+)[-_]([A-Z]+\d+)_(.+)", 3),
-            # 3. Format avec underscores: PROJECT_SEQ##_SHOT##_LAYER
+            # 3. Underscore format: PROJECT_SEQ##_SHOT##_LAYER
             (r"(.+?)_([A-Z]+\d+)_([A-Z]+\d+)_(.+)", 4),
-            # 4. Dernier segment après underscore: ...SHOT##_LAYER
+            # 4. Last segment after underscore: ...SHOT##_LAYER
             (r"_([^_]+)$", 1),
         ]
 
@@ -1039,26 +961,26 @@ def collect_deadline_layers(grouped_jobs):   # PASSE 2
                 )
                 break
         else:
-            # Fallback: utilise basename de output_dir
+            # Fallback: use basename from output_dir
             layer_name = os.path.basename(output_dir)
             addLog(
                 f"  Layer extracted via fallback (basename): '{layer_name}' from base: '{base_name}'"
             )
 
-        # Détecte la séquence d'images
+        # Detect image sequence
         seq_info = detect_image_sequence_info(output_dir)
 
         if not seq_info:
             addLog(f"  Skip job (no sequence): {output_dir}")
             continue
 
-        # Si la séquence est dans un sous-dossier, utilise le chemin complet
+        # If sequence in subdir, use full path
         actual_directory = output_dir
         if "subfolder" in seq_info:
             actual_directory = os.path.join(output_dir, seq_info["subfolder"])
             addLog(f"  Images found in subfolder: {seq_info['subfolder']}")
 
-        # Calcule frame range et completion combinés
+        # Get frame range and combined completion
         first_frame, last_frame = get_combined_frame_range(associated_jobs)
         completion_info = get_combined_job_completion(associated_jobs)
 
@@ -1080,7 +1002,7 @@ def collect_deadline_layers(grouped_jobs):   # PASSE 2
             "merge_operation": "over",  # Default
         }
 
-        # Ajoute infos Prism si disponibles
+        # Add prism info if available
         if prism_info:
             info.update(
                 {
@@ -1101,12 +1023,14 @@ def collect_deadline_layers(grouped_jobs):   # PASSE 2
     return output_info
 
 
-def collect_filesystem_layers(prism_contexts, existing_layers):  # PASSE 3
+def collect_filesystem_layers(prism_contexts, existing_layers): 
     addLog("\n--- PASSE 3: Scan filesystem ---")
 
     filesystem_count = 0
 
-    max_total_frames = max((i.get("total_frames", 0) for i in existing_layers), default=0)
+    max_total_frames = max(
+        (i.get("total_frames", 0) for i in existing_layers), default=0
+    )
 
     for context_key, prism_info in prism_contexts.items():
         project_root, sequence, shot = context_key
@@ -1116,7 +1040,7 @@ def collect_filesystem_layers(prism_contexts, existing_layers):  # PASSE 3
         )
 
         for fs_layer in filesystem_layers:
-            # Vérifie si cette version existe déjà dans output_info
+            # Check if this version already exists
             already_exists = False
             for existing in existing_layers:
                 if (
@@ -1143,29 +1067,32 @@ def collect_filesystem_layers(prism_contexts, existing_layers):  # PASSE 3
     addLog(f"Layers depuis filesystem: {filesystem_count}")
     return existing_layers
 
+
 def get_output_dirs(jobs_to_process, filter_qc_layers=True):
     grouped_jobs = group_high_prio_and_render_jobs(jobs_to_process)
     prism_contexts = collect_prism_contexts(grouped_jobs)
-    output_info   = collect_deadline_layers(grouped_jobs)
-    output_info  += collect_filesystem_layers(prism_contexts, output_info)
+    output_info = collect_deadline_layers(grouped_jobs)
+    output_info += collect_filesystem_layers(prism_contexts, output_info)
     if filter_qc_layers:
-        output_info = [i for i in output_info if not i["layer_name"].upper().startswith("QC")]
+        output_info = [
+            i for i in output_info if not i["layer_name"].upper().startswith("QC")
+        ]
     return output_info
+
 
 def group_output_info_for_ui(output_info):
     """
-    Regroupe les entrées output_info par layer_name pour l'affichage dans l'UI.
-    Chaque layer aura toutes ses versions dans un tableau 'versions'.
+    Group output info for UI, each layer has all its versions in a table format.
 
     Args:
-        output_info (list): Liste de dicts avec une entrée par version
+        output_info (list): Liste of dicts with one entry per version
             Format: [{'layer_name': 'X', 'version': 1, 'completion': 50, ...}, ...]
 
     Returns:
-        list: Liste de dicts groupés par layer
+        list: List of dicts grouped by layer
             Format: [{
                 'layer_name': 'X',
-                'source': 'deadline',  # 'deadline' si au moins une version vient de deadline
+                'source': 'deadline',  # 'deadline' if at least one version from deadline
                 'versions': [
                     {
                         'version': 'v001',
@@ -1180,7 +1107,7 @@ def group_output_info_for_ui(output_info):
                     },
                     ...
                 ],
-                'selected_version_index': 0,  # Index de la dernière version
+                'selected_version_index': 0,  # Index of the latest version
                 'merge_operation': 'over',
                 'project': '...',
                 'sequence': '...',
@@ -1189,7 +1116,7 @@ def group_output_info_for_ui(output_info):
     """
     addLog("\n=== group_output_info_for_ui: START ===")
 
-    # Groupe par layer_name
+    # Group by layer name
     layers_dict = {}  # {layer_name: [list of version entries]}
 
     for entry in output_info:
@@ -1202,29 +1129,28 @@ def group_output_info_for_ui(output_info):
 
     addLog(f"Found {len(layers_dict)} unique layers")
 
-    # Construit la structure pour l'UI
+    # Build UI Structure
     grouped_output = []
 
     for layer_name, entries in layers_dict.items():
-        # Trie les entrées par numéro de version
+        # Sort entries by version num
         entries_sorted = sorted(entries, key=lambda x: x.get("version", 0))
 
-        # Détermine la source prioritaire (deadline > filesystem)
+        # Determine priority source
         has_deadline = any(e.get("source") == "deadline" for e in entries_sorted)
         source = "deadline" if has_deadline else "filesystem"
 
-        # Construit le tableau de versions
+        # Build version table
         versions_list = []
         for entry in entries_sorted:
             version_num = entry.get("version", 0)
             version_str = f"v{version_num:03d}"
 
-            # Extrait les infos de complétion
+            # Get completion info
             completion = entry.get("completion", 100)
             status = entry.get("status", "Completed")
             total_frames = entry.get("total_frames", 0)
 
-            # Calcule frames_completed depuis completion
             frames_completed = (
                 int((completion * total_frames) / 100.0) if total_frames > 0 else 0
             )
@@ -1246,7 +1172,7 @@ def group_output_info_for_ui(output_info):
 
             versions_list.append(version_info)
 
-        # Prend les métadonnées de la dernière version
+        # Get latest version metadata
         last_entry = entries_sorted[-1]
 
         grouped_entry = {
@@ -1266,7 +1192,7 @@ def group_output_info_for_ui(output_info):
         grouped_output.append(grouped_entry)
 
         addLog(
-            f"  Layer '{layer_name}': {len(versions_list)} version(s), source={source}"
+            f"\tLayer '{layer_name}': {len(versions_list)} version(s), source={source}"
         )
 
     addLog(f"=== group_output_info_for_ui: END - {len(grouped_output)} layers ===\n")
@@ -1281,12 +1207,7 @@ def group_output_info_for_ui(output_info):
 
 def render_nuke_script(nuke_script_path, first_frame, last_frame):
     """
-    Lance le rendu du script Nuke en ligne de commande (rendu local).
-
-    Args:
-        nuke_script_path (str): Chemin du script Nuke (.nk)
-        first_frame (int): Première frame
-        last_frame (int): Dernière frame
+    Launch nuke render script on command line.
     """
     nuke_exe = get_nuke_executable()
 
@@ -1297,8 +1218,8 @@ def render_nuke_script(nuke_script_path, first_frame, last_frame):
         f"{first_frame}-{last_frame}",
     ]
 
-    addLog("\nLancement rendu Nuke:")
-    addLog(f"  Commande: {' '.join(cmd)}")
+    addLog("\nLaunch Nuke script")
+    addLog(f"\tCommand: {' '.join(cmd)}")
 
     try:
         process = subprocess.Popen(
@@ -1316,12 +1237,12 @@ def render_nuke_script(nuke_script_path, first_frame, last_frame):
         process.wait()
 
         if process.returncode == 0:
-            addLog("\n=== Rendu terminé avec succès ===")
+            addLog("\n=== Render successfully done ===")
         else:
-            addLog(f"\n=== Erreur rendu (code: {process.returncode}) ===")
+            addLog(f"\n=== Render error (code: {process.returncode}) ===")
 
     except Exception as e:
-        addLog(f"Erreur lancement rendu: {str(e)}")
+        addLog(f"Render launch error: {str(e)}")
 
 
 def submit_to_deadline(
@@ -1334,18 +1255,18 @@ def submit_to_deadline(
     job_name=None,
 ):
     """
-    Soumet le slap comp à Deadline avec dépendances sur les jobs sources.
-
+    Submit the slap comp to Deadline with dependencies on the job sources.
+    
     Args:
-        nuke_script_path (str): Chemin du script Nuke
-        first_frame (int): Première frame
-        last_frame (int): Dernière frame
-        output_info (list): Liste des infos de sortie (pour dépendances)
-        render_dir (str): Dossier de rendu
-        render_filename (str): Nom du fichier de rendu
-        job_name (str): Nom du job Deadline (optionnel, extrait du .nk si non fourni)
+        nuke_script_path (str): Nuke script path
+        first_frame (int): First frame
+        last_frame (int): Last frame
+        output_info (list): Output info to get dependencies
+        render_dir (str): Render directory
+        render_filename (str): Render file name
+        job_name (str): Deadline job name (optionnal, gets extracted from .nk file otherwise)
     """
-    # Importe le module de soumission
+    # Import submission module
     repo_path = RepositoryUtils.GetRootDirectory()
     submission_path = os.path.join(
         repo_path, "custom", "scripts", "Submission", "SlapComp"
@@ -1356,7 +1277,7 @@ def submit_to_deadline(
     try:
         from SubmitSlapCompToDeadline import submit_slap_comp_job  # type: ignore
 
-        # Collecte les job IDs pour les dépendances
+        # Collect job ids for dependencies
         dependency_job_ids = []
         for info in output_info:
             if "job_id" in info and info["job_id"] is not None:
@@ -1365,7 +1286,7 @@ def submit_to_deadline(
             elif "job_ids" in info:
                 dependency_job_ids.extend(info["job_ids"])
                 addLog(f"multi, current deps : {dependency_job_ids}")
-        # Retire les doublons
+        # Remove duplicates
         dependency_job_ids = list(set(dependency_job_ids))
         addLog(f"Deps without dupes : {dependency_job_ids}")
 
@@ -1380,7 +1301,7 @@ def submit_to_deadline(
             addLog(f"Render dir: {normalize_path_for_nuke(render_dir)}")
             addLog(f"Render filename: {render_filename}")
 
-        # Soumet le job via le module externe
+        # Submit the job via external module
         job_id = submit_slap_comp_job(
             nk_path=nuke_script_path,
             first_frame=first_frame,
@@ -1408,55 +1329,53 @@ def submit_to_deadline(
 
 def call_nuke_script(output_info, render_mode="none"):
     """
-    Génère et exécute le script Nuke pour créer le slap comp.
+    Generate and execute the nuke script to create slapcomp.
 
     Args:
-        output_info (list): Liste ordonnée des infos de sortie
-        render_mode (str): "none", "local", ou "deadline"
+        output_info (list): ordered list of output info
+        render_mode (str): "none", "local", or "deadline"
     """
 
     addLog(f"Full output info : {output_info}")
 
     if not output_info or len(output_info) == 0:
-        addLog("Aucune donnée à traiter")
+        addLog("No data to treat")
         return
 
-    # Extrait infos du premier item
+    # Get first item info
     first_info = output_info[0]
     first_directory = first_info.get("directory", "")
 
-    # Extrait les métadonnées de base (peuvent déjà être présentes)
+    # Get basic info from metadata
     project = first_info.get("project", "Unknown")
     sequence = first_info.get("sequence", "Unknown")
     shot = first_info.get("shot", "Unknown")
 
-    # Parse le directory pour obtenir prism_info complet (comme ancienne version)
+    # Get complete prism info
     prism_info = extract_prism_from_filesystem_path(first_directory)
 
-    # Construit les paths Prism SI prism_info valide
+    # Build prism path if complete
     if prism_info:
-        # Utilise les données extraites de prism_info
         shot_path = prism_info["shot_path"]
         project = prism_info.get(
             "project", project
-        )  # Override si trouvé dans prism_info
+        )
         sequence = prism_info["sequence"]
         shot = prism_info["shot"]
 
-        # Détecte le département
         department = detect_department(shot_path)
 
-        # STEP 1: Build temp paths avec version=1 pour trouver scenefile_dir
+        # STEP 1: Build temp paths with version=1 to find scenefile_dir
         temp_paths = build_prism_slapcomp_paths(
             shot_path, project, sequence, shot, department, 1
         )
         scenefile_dir = temp_paths["scenefile_dir"]
 
-        # STEP 2: Trouve la prochaine version (sans project dans le nom de fichier)
+        # STEP 2: Find next version (without project in filename)
         render_filename_base = f"{sequence}_{shot}_SlapComp"
         next_version = find_next_slapcomp_version(scenefile_dir, render_filename_base)
 
-        # STEP 3: Build final paths avec la vraie version
+        # STEP 3: Build final paths with the real version
         paths = build_prism_slapcomp_paths(
             shot_path, project, sequence, shot, department, next_version
         )
@@ -1474,7 +1393,7 @@ def call_nuke_script(output_info, render_mode="none"):
         addLog(f"Version: v{next_version:03d}")
         addLog(f"Job name: {job_name}")
     else:
-        # Fallback si pas de structure Prism
+        # Fallback if no Prism structure found
         output_dir = first_info.get("directory", "")
         parent_dir = os.path.dirname(output_dir)
         scenefile_dir = parent_dir
@@ -1486,20 +1405,20 @@ def call_nuke_script(output_info, render_mode="none"):
             scenefile_dir, f"{render_filename_base}_v{next_version:03d}.nk"
         )
         render_filename = f"{render_filename_base}_v{next_version:03d}.%04d.exr"
-        job_name = None  # Pas de job name spécifique en fallback
+        job_name = None 
 
-        addLog("\n=== Structure Prism non détectée, utilisation fallback ===")
+        addLog("\n=== Structure Prism not detected, using fallback ===")
 
-    addLog("\nGénération slap comp:")
+    addLog("\nGenerating slapcomp")
     addLog(f"  Scenefile: {normalize_path_for_nuke(output_nk)}")
     addLog(f"  Render dir: {normalize_path_for_nuke(render_dir)}")
     addLog(f"  Render filename: {render_filename}")
 
-    # Crée les dossiers si nécessaire
+    # Create necessary files
     os.makedirs(scenefile_dir, exist_ok=True)
     os.makedirs(render_dir, exist_ok=True)
 
-    # Génère le script Python temporaire pour Nuke
+    # Genereate temp python nuke script
     ocio_config = get_file_path_from_config("OCIO")
     script_content = f"""
 import nuke
@@ -1606,7 +1525,7 @@ print("Slap comp created successfully: {output_nk}")
         output_nk=normalize_path_for_nuke(output_nk),
     )
 
-    # Écrit le script temporaire
+    # Write temporary script
     temp_script = tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False)
     temp_script.write(script_content)
     temp_script_path = temp_script.name
@@ -1614,7 +1533,7 @@ print("Slap comp created successfully: {output_nk}")
 
     addLog(f"\nScript temporaire: {temp_script_path}")
 
-    # Exécute Nuke en mode terminal
+    # Execute nuke in terminal
     nuke_exe = get_nuke_executable()
     cmd = [nuke_exe, "-t", temp_script_path]
 
@@ -1635,7 +1554,7 @@ print("Slap comp created successfully: {output_nk}")
 
         process.wait()
 
-        # Supprime le script temporaire
+        # Delete temp script
         try:
             os.unlink(temp_script_path)
         except Exception:
@@ -1646,9 +1565,8 @@ print("Slap comp created successfully: {output_nk}")
                 addLog("\n=== SUCCESS ===")
                 addLog(f"Slap comp cree: {normalize_path_for_nuke(output_nk)}")
 
-                # Lance le rendu selon le mode choisi
+                # Launch dependeing on selected mode
                 if render_mode != "none":
-                    # Calcule le frame range global
                     all_first = min(info["first_frame"] for info in output_info)
                     all_last = max(info["last_frame"] for info in output_info)
 
@@ -1670,14 +1588,14 @@ print("Slap comp created successfully: {output_nk}")
                     )
 
             else:
-                addLog("\n=== ATTENTION ===")
-                addLog(f"Le fichier n'existe pas: {normalize_path_for_nuke(output_nk)}")
+                addLog("\n=== WARNING ===")
+                addLog(f"File not found: {normalize_path_for_nuke(output_nk)}")
         else:
-            addLog("\n=== ERREUR ===")
-            addLog(f"Code retour: {process.returncode}")
+            addLog("\n=== ERROR ===")
+            addLog(f"Return code: {process.returncode}")
 
     except Exception as e:
-        addLog(f"ERREUR: {str(e)}")
+        addLog(f"ERROR: {str(e)}")
 
 
 # ============================================================================
@@ -1980,24 +1898,12 @@ def generate_versioninfo(scenefile_path, sequence, shot, department, version_num
         "user": get_deadline_user_short(),
     }
 
-    addLog("\n Version info collected: ")
-    addLog(f"Project path: {versioninfo['project_path']}")
-    addLog(f"Sequence: {versioninfo['sequence']}")
-    addLog(f"department: {versioninfo['department']}")
-    addLog(f"Task: {versioninfo['task']}")
-    addLog(f"Version: {versioninfo['version']}")
-    addLog(f"Type: {versioninfo['type']}")
-    addLog(f"Hierarchy: {versioninfo['hierarchy']}")
-    addLog(f"Username: {versioninfo['username']}")
-    addLog(f"User: {versioninfo['user']}")
-    addLog(f"Locations: {versioninfo['locations']}")
+    addLog("\n Version info collected")
 
     # Create json file
     json_path = os.path.splitext(scenefile_path)[0] + "_versioninfo.json"
     with open(json_path, "w+") as f:
         json.dump(versioninfo, f, indent=2)
-
-    addLog(f"Version info saved: {json_path}")
 
     return versioninfo
 
@@ -2011,11 +1917,9 @@ def get_deadline_username():
 def get_deadline_user_short():
 
     full_name = ClientUtils.GetDeadlineUser()
-    addLog(f"Full name: {full_name}")
     if full_name:
         # Extract initials or first 3 chars
         parts = full_name.split(".")
-        addLog(f"Parts: {parts}")
         if len(parts) >= 2:
             return (
                 parts[0][0] + parts[-1][0]
@@ -2028,16 +1932,15 @@ def get_deadline_user_short():
 # SECTION 9: Run functions
 # ============================================================================
 
+
 def get_selected_jobs():
     selected_jobs = []
     selected_jobs = MonitorUtils.GetSelectedJobs()
-    ClientUtils.LogText(f"Selected jobs: {selected_jobs}")
 
     if not selected_jobs:
         ClientUtils.LogText("Aucun job ou batch selectionne")
         return
 
-    ClientUtils.LogText(f"Returning: {selected_jobs}")
     return selected_jobs
 
 
