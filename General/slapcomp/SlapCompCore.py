@@ -58,7 +58,8 @@ def normalize_path_for_nuke(path):
 
 def get_file_path_from_config(attr_name):
     current_directory = os.path.dirname(os.path.abspath(__file__))
-    config_file = os.path.join(current_directory, "path_config.ini")
+    parent_dir = os.path.dirname(current_directory)
+    config_file = os.path.join(parent_dir, "path_config.ini")
 
     config = configparser.ConfigParser()
     try:
@@ -988,41 +989,7 @@ def find_next_slapcomp_version(scenefile_dir, render_filename):
 # SECTION 5: OUTPUT COLLECTION
 # ============================================================================
 
-
-def get_output_dirs(jobs_to_process, filter_qc_layers=True):
-    """
-    Extrait les dossiers de sortie des jobs et fusionne avec les render layers du filesystem.
-    Scan SYSTÉMATIQUE du filesystem même si aucun job Deadline valide n'est trouvé.
-
-    Args:
-        jobs_to_process (list): Liste de jobs Deadline
-        filter_qc_layers (bool): Si True, filtre les layers commençant par "QC"
-
-    Returns:
-        list: Liste de dicts avec toutes les infos de sortie (versions multiples, completion, etc.)
-    """
-    addLog("\n=== get_output_dirs: START ===")
-    addLog(f"Jobs to process: {len(jobs_to_process)}")
-
-    for idx, job in enumerate(jobs_to_process):
-        addLog(f"  Job {idx + 1}: {job.JobName}")
-
-    output_info = []
-
-    # Groupe les jobs par clé (sans suffixe _high_prio_render ou _render)
-    addLog("\nAppel de group_high_prio_and_render_jobs...")
-    grouped_jobs = group_high_prio_and_render_jobs(jobs_to_process)
-    addLog(f"Retour de group_high_prio_and_render_jobs: {type(grouped_jobs)}")
-
-    addLog(f"Jobs groupés: {len(grouped_jobs)} groupes (toutes versions)")
-
-    # Log détaillé des groupes pour debug
-    for (base_name, version), jobs in grouped_jobs.items():
-        addLog(f"  Groupe: base='{base_name}' v{version:03d} ({len(jobs)} job(s))")
-
-    # ============================================================================
-    # PASSE 1: Collecter TOUS les contextes Prism (project/sequence/shot)
-    # ============================================================================
+def collect_prism_contexts(grouped_jobs):    # PASSE 1
     prism_contexts = {}  # Dict: {(project_root, sequence, shot): prism_info_dict}
 
     addLog("\n--- PASSE 1: Collecte des contextes Prism ---")
@@ -1047,11 +1014,13 @@ def get_output_dirs(jobs_to_process, filter_qc_layers=True):
             )
 
     addLog(f"Total contextes Prism: {len(prism_contexts)}")
+    return prism_contexts
 
-    # ============================================================================
-    # PASSE 2: Traiter les jobs Deadline et extraire infos
-    # ============================================================================
-    addLog("\n--- PASSE 2: Traitement jobs Deadline ---")
+def collect_deadline_layers(grouped_jobs):   # PASSE 2
+
+    output_info = []
+
+    addLog(f"Jobs groupés: {len(grouped_jobs)} groupes (toutes versions)")
 
     for (base_name, version), associated_jobs in grouped_jobs.items():
         job = associated_jobs[0]
@@ -1150,15 +1119,15 @@ def get_output_dirs(jobs_to_process, filter_qc_layers=True):
         )
 
     addLog(f"Layers depuis Deadline: {len(output_info)}")
+    return output_info
 
-    # ============================================================================
-    # PASSE 3: Scanner filesystem pour TOUS les contextes Prism
-    # ============================================================================
+
+def collect_filesystem_layers(prism_contexts, existing_layers):  # PASSE 3
     addLog("\n--- PASSE 3: Scan filesystem ---")
 
     filesystem_count = 0
 
-    max_total_frames = completion_info["total_frames"]
+    max_total_frames = max((i.get("total_frames", 0) for i in existing_layers), default=0)
 
     for context_key, prism_info in prism_contexts.items():
         project_root, sequence, shot = context_key
@@ -1170,7 +1139,7 @@ def get_output_dirs(jobs_to_process, filter_qc_layers=True):
         for fs_layer in filesystem_layers:
             # Vérifie si cette version existe déjà dans output_info
             already_exists = False
-            for existing in output_info:
+            for existing in existing_layers:
                 if (
                     existing.get("layer_name") == fs_layer["layer_name"]
                     and existing.get("version") == fs_layer["version"]
@@ -1186,28 +1155,23 @@ def get_output_dirs(jobs_to_process, filter_qc_layers=True):
                 fs_layer["merge_operation"] = "over"
                 fs_layer["shot_path"] = prism_info["shot_path"]
                 fs_layer["project_root"] = prism_info["project_root"]
-                output_info.append(fs_layer)
+                existing_layers.append(fs_layer)
                 filesystem_count += 1
                 addLog(
                     f"    Added from filesystem: {fs_layer['layer_name']} v{fs_layer['version']:03d}"
                 )
 
     addLog(f"Layers depuis filesystem: {filesystem_count}")
+    return existing_layers
 
-    # Filtre les layers QC si demandé
+def get_output_dirs(jobs_to_process, filter_qc_layers=True):
+    grouped_jobs = group_high_prio_and_render_jobs(jobs_to_process)
+    prism_contexts = collect_prism_contexts(grouped_jobs)
+    output_info   = collect_deadline_layers(grouped_jobs)
+    output_info  += collect_filesystem_layers(prism_contexts, output_info)
     if filter_qc_layers:
-        before_filter = len(output_info)
-        output_info = [
-            info
-            for info in output_info
-            if not info["layer_name"].upper().startswith("QC")
-        ]
-        addLog(f"\nFiltre QC: {before_filter - len(output_info)} layers retirés")
-
-    addLog(f"\n=== get_output_dirs: END - Total: {len(output_info)} layers ===\n")
-
+        output_info = [i for i in output_info if not i["layer_name"].upper().startswith("QC")]
     return output_info
-
 
 def group_output_info_for_ui(output_info):
     """
@@ -2087,13 +2051,14 @@ def get_deadline_user_short():
 
 def get_selected_jobs():
     selected_jobs = []
-
     selected_jobs = MonitorUtils.GetSelectedJobs()
+    ClientUtils.LogText(f"Selected jobs: {selected_jobs}")
 
     if not selected_jobs:
         ClientUtils.LogText("Aucun job ou batch selectionne")
         return
 
+    ClientUtils.LogText(f"Returning: {selected_jobs}")
     return selected_jobs
 
 

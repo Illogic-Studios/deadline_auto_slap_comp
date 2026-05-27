@@ -19,11 +19,11 @@ general_scripts_path = os.path.join(repo_path, "custom", "scripts", "General")
 if general_scripts_path not in sys.path:
     sys.path.insert(0, general_scripts_path)
 
-import SlapCompCore
+from . import SlapCompCore  # noqa: E402
 
 # Imports Qt (compatible PySide2 et PyQt5)
 try:
-    from PySide2.QtWidgets import (
+    from PySide2.QtWidgets import ( # type: ignore
         QApplication,
         QDialog,
         QVBoxLayout,
@@ -39,10 +39,10 @@ try:
         QWidget,
         QMessageBox,
     )
-    from PySide2.QtCore import Qt
-    from PySide2.QtGui import QColor
+    from PySide2.QtCore import Qt # type: ignore
+    from PySide2.QtGui import QColor # type: ignore
 except ImportError:
-    from PyQt5.QtWidgets import (
+    from PyQt5.QtWidgets import ( # type: ignore
         QApplication,
         QDialog,
         QVBoxLayout,
@@ -58,8 +58,8 @@ except ImportError:
         QWidget,
         QMessageBox,
     )
-    from PyQt5.QtCore import Qt
-    from PyQt5.QtGui import QColor
+    from PyQt5.QtCore import Qt # type: ignore
+    from PyQt5.QtGui import QColor # type: ignore
 
 
 # Variables globales

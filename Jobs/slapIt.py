@@ -28,9 +28,11 @@ if "slapcomp" in sys.modules:
 
 
 # TODO: Create common function to share with autoslapit
-def get_jobs_to_process(selected_jobs: list):
+def get_jobs_to_process(selected_jobs):
     jobs_to_process = []
     processed_batches = set()
+
+    ClientUtils.LogText(f"Selected jobs test: {selected_jobs}")
 
     for job in selected_jobs:
         batch_name = job.JobBatchName
@@ -50,7 +52,7 @@ def get_jobs_to_process(selected_jobs: list):
 
 def handle_interface(output_info):
     ClientUtils.LogText("\nOuverture interface...")
-    dialog_result = slapcomp.show_slap_comp_dialog(output_info)
+    dialog_result = slapcomp.show_slap_comp_ui_dialog(output_info)
 
     if dialog_result:
         # Extrait les données et le mode de rendu
@@ -89,7 +91,8 @@ def __main__():
     """Point d'entrée principal - workflow avec interface utilisateur."""
 
     selected_jobs = slapcomp.get_selected_jobs()
-    jobs_to_process = get_jobs_to_process()
+    ClientUtils.LogText(f"Got selected jobs: {selected_jobs}")
+    jobs_to_process = get_jobs_to_process(selected_jobs)
 
     output_info = slapcomp.get_output_dirs(jobs_to_process)
     if not output_info:
