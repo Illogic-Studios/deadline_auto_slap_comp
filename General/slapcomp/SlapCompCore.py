@@ -239,30 +239,9 @@ def group_high_prio_and_render_jobs(jobs):
 
     return final_grouped
 
-
 def get_combined_frame_range(jobs):
-    """
-    Calcule le frame range combiné de plusieurs jobs.
-
-    Args:
-        jobs (list): Liste de jobs Deadline
-
-    Returns:
-        tuple: (first_frame, last_frame)
-    """
-    all_frames = []
-
-    for job in jobs:
-        frames_list = job.JobFramesList
-        if frames_list:
-            # JobFramesList retourne un tableau d'entiers directement
-            if hasattr(frames_list, "__iter__"):
-                all_frames.extend(frames_list)
-
-    if all_frames:
-        return (min(all_frames), max(all_frames))
-    return (1, 1)
-
+    frames = [f for job in jobs for f in (job.JobFramesList or [])]
+    return (min(frames), max(frames)) if frames else (1, 1)
 
 def get_combined_job_completion(jobs):
     """
@@ -290,12 +269,12 @@ def get_combined_job_completion(jobs):
 
         # Count total frames (JobFramesList est un tableau d'entiers)
         job_frames = 0
-        if frames_list and hasattr(frames_list, "__iter__"):
+        if frames_list:
             job_frames = len(list(frames_list))
 
         # Count completed frames (JobCompletedTasks est un tableau d'entiers)
         job_completed = 0
-        if completed_list and hasattr(completed_list, "__iter__"):
+        if completed_list:
             job_completed = len(list(completed_list))
 
         total_frames += job_frames
