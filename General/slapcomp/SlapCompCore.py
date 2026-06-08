@@ -249,17 +249,12 @@ def get_combined_job_completion(jobs):
 
     for job in jobs:
         frames_list = job.JobFramesList
-        completed_list = job.JobCompletedTasks
+        job_completed = job.JobCompletedTasks
 
         # Count total frames
         job_frames = 0
         if frames_list:
             job_frames = len(list(frames_list))
-
-        # Count completed frames
-        job_completed = 0
-        if completed_list:
-            job_completed = len(list(completed_list))
 
         total_frames += job_frames
         total_completed += job_completed
@@ -412,6 +407,10 @@ def detect_image_sequence_info(directory):
 
         except (OSError, IOError):
             return None
+
+    # Check if any sequences were found
+    if not sequences:
+        return None
 
     main_sequence = max(sequences.items(), key=lambda x: len(x[1]["frames"]))
     base_name, seq_info = main_sequence
@@ -624,14 +623,11 @@ def scan_prism_render_layers(project_root, sequence, shot, max_total_frames):
                     layer_jobs = RepositoryUtils.GetJobs(layer_job_ids, True)
 
                     completion = get_combined_job_completion(layer_jobs)
-                    addLog(f"DEBUGDEBUG: completion {completion}")
                     first_frame, last_frame = get_combined_frame_range(layer_jobs)
 
                     layer_dict["total_frames"] = completion["total_frames"]
                     layer_dict["first_frame"] = first_frame
                     layer_dict["last_frame"] = last_frame
-
-                    addLog(f"DEBUGDEBUG: layer dict {layer_dict}")
 
                 layers.append(layer_dict)
                 addLog(
@@ -659,7 +655,6 @@ def find_deadline_job(project, sequence, shot, layer_name, version_num):
     for job in jobs:
         if job_name in job.JobName:
             if job.JobComment == "Prism-Submission-Python":
-                addLog(f"DEBUG: job match {job.JobName}")
                 dependencies.append(job.JobId)
 
     return dependencies
@@ -877,9 +872,7 @@ def find_next_slapcomp_version(scenefile_dir, render_filename):
     pattern = re.compile(rf"{re.escape(render_filename)}_v(\d{{3,4}})\.nk$")
 
     for filename in existing_files:
-        match = pattern.search(
-            filename
-        ) 
+        match = pattern.search(filename)
         if match:
             version = int(match.group(1))
             max_version = max(max_version, version)
@@ -894,7 +887,6 @@ def find_next_slapcomp_version(scenefile_dir, render_filename):
 # ============================================================================
 # SECTION 5: OUTPUT COLLECTION
 # ============================================================================
-
 
 def collect_prism_contexts(grouped_jobs):  # PASSE 1
     prism_contexts = {}  # Dict: {(project_root, sequence, shot): prism_info_dict}
@@ -939,7 +931,7 @@ def collect_deadline_layers(grouped_jobs):  # PASSE 2
         output_dir = output_dirs[0]
 
         # Extract layer from basename using generic patterns
-        layer_name = os.path.basename(output_dir) 
+        layer_name = os.path.basename(output_dir)
 
         layer_patterns = [
             # 1. Complete format: PROJECT_SEQ##-SHOT##_LAYER
@@ -1023,18 +1015,32 @@ def collect_deadline_layers(grouped_jobs):  # PASSE 2
     return output_info
 
 
-def collect_filesystem_layers(prism_contexts, existing_layers): 
+def collect_filesystem_layers(prism_contexts, existing_layers):
     addLog("\n--- PASSE 3: Scan filesystem ---")
 
     filesystem_count = 0
 
-    max_total_frames = max(
-        (i.get("total_frames", 0) for i in existing_layers), default=0
-    )
-
     for context_key, prism_info in prism_contexts.items():
         project_root, sequence, shot = context_key
-        addLog(f"  Scanning: {project_root}/{sequence}/{shot}")
+
+        # Expected full frame SPAN of this shot, derived from min/max of the
+        # frame ranges (NOT a sum of frame-list lengths). A sparse high_prio
+        # subset still yields the correct span instead of its sparse count.
+        context_layers = [
+            i
+            for i in existing_layers
+            if i.get("sequence") == sequence and i.get("shot") == shot
+        ]
+        if context_layers:
+            first = min(i["first_frame"] for i in context_layers)
+            last = max(i["last_frame"] for i in context_layers)
+            max_total_frames = last - first + 1
+        else:
+            max_total_frames = 0
+
+        addLog(
+            f"  Scanning: {project_root}/{sequence}/{shot} (span={max_total_frames})"
+        )
         filesystem_layers = scan_prism_render_layers(
             project_root, sequence, shot, max_total_frames
         )
@@ -1072,7 +1078,7 @@ def get_output_dirs(jobs_to_process, filter_qc_layers=True):
     grouped_jobs = group_high_prio_and_render_jobs(jobs_to_process)
     prism_contexts = collect_prism_contexts(grouped_jobs)
     output_info = collect_deadline_layers(grouped_jobs)
-    output_info += collect_filesystem_layers(prism_contexts, output_info)
+    output_info = collect_filesystem_layers(prism_contexts, output_info)
     if filter_qc_layers:
         output_info = [
             i for i in output_info if not i["layer_name"].upper().startswith("QC")
@@ -1256,7 +1262,7 @@ def submit_to_deadline(
 ):
     """
     Submit the slap comp to Deadline with dependencies on the job sources.
-    
+
     Args:
         nuke_script_path (str): Nuke script path
         first_frame (int): First frame
@@ -1357,9 +1363,7 @@ def call_nuke_script(output_info, render_mode="none"):
     # Build prism path if complete
     if prism_info:
         shot_path = prism_info["shot_path"]
-        project = prism_info.get(
-            "project", project
-        )
+        project = prism_info.get("project", project)
         sequence = prism_info["sequence"]
         shot = prism_info["shot"]
 
@@ -1405,7 +1409,7 @@ def call_nuke_script(output_info, render_mode="none"):
             scenefile_dir, f"{render_filename_base}_v{next_version:03d}.nk"
         )
         render_filename = f"{render_filename_base}_v{next_version:03d}.%04d.exr"
-        job_name = None 
+        job_name = None
 
         addLog("\n=== Structure Prism not detected, using fallback ===")
 
