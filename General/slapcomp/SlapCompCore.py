@@ -25,6 +25,8 @@ import datetime
 import configparser
 from Deadline.Scripting import ClientUtils, RepositoryUtils, MonitorUtils  # type: ignore
 
+KITSU_PRODUCTIONS = ["mikes_2511"]
+
 # ============================================================================
 # SECTION 1: UTILITIES (NUKE)
 # ============================================================================
@@ -503,21 +505,31 @@ def detect_department(shot_path):
         shot_path (str): Prism shot path
 
     Returns:
-        str: Dept name, "Compo" by default
+        str: Dept name, "Compositing" by default
     """
     if not os.path.isdir(shot_path):
-        return "Compo"
+        print(f"DEBUG: NOT SHOTPATH {shot_path}")
+        return "Compositing"
 
     # Variantes possibles du dossier de comp
-    variants = ["Compo", "Comp", "2D", "Compositing"]
+    variants = ["Compositing", "Compo", "Comp", "2D"]
 
     for variant in variants:
         test_path = os.path.join(shot_path, variant)
         if os.path.isdir(test_path):
+            print(f"DEBUG: VARIANT {variant},{test_path}") 
             return variant
 
+    # Default for older productions is Comp
+    # FIXME: Remove when we no longer have any lingering kitsu productions
+    for prod in KITSU_PRODUCTIONS:
+        if prod in shot_path:
+            print(f"DEBUG: old ahh {shot_path}")
+            return "Comp"
+
     # Par défaut
-    return "Compo"
+    print(f"DEBUG: default really {shot_path}")
+    return "Compositing"
 
 
 def scan_prism_render_layers(project_root, sequence, shot, max_total_frames):
