@@ -26,6 +26,9 @@ import configparser
 from Deadline.Scripting import ClientUtils, RepositoryUtils, MonitorUtils  # type: ignore
 
 KITSU_PRODUCTIONS = ["mikes_2511"]
+BUILD_SLAPCOMP_SCRIPT = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "build_nuke_slapcomp.py"
+)
 
 # ============================================================================
 # SECTION 1: UTILITIES (NUKE)
@@ -517,7 +520,7 @@ def detect_department(shot_path):
     for variant in variants:
         test_path = os.path.join(shot_path, variant)
         if os.path.isdir(test_path):
-            print(f"DEBUG: VARIANT {variant},{test_path}") 
+            print(f"DEBUG: VARIANT {variant},{test_path}")
             return variant
 
     # Default for older productions is Comp
@@ -899,6 +902,7 @@ def find_next_slapcomp_version(scenefile_dir, render_filename):
 # ============================================================================
 # SECTION 5: OUTPUT COLLECTION
 # ============================================================================
+
 
 def collect_prism_contexts(grouped_jobs):  # PASSE 1
     prism_contexts = {}  # Dict: {(project_root, sequence, shot): prism_info_dict}
@@ -1345,35 +1349,107 @@ def submit_to_deadline(
         traceback.print_exc()
 
 
-def call_nuke_script(output_info, render_mode="none"):
-    """
-    Generate and execute the nuke script to create slapcomp.
+def build_slapcomp_data(output_info, paths):
+    """Builds dictionary with the data necessary to generate the nuke scripts
 
     Args:
-        output_info (list): ordered list of output info
-        render_mode (str): "none", "local", or "deadline"
+        output_info (dict): main object for this tool
+        paths (dict): list of paths for slapcomp ()
+
+    Returns:
+        dict: all data necessary to build:
+            "ocio_config": path to OCIO
+            "layers": list of layers containing "path", "first_frame", "last_frame", "layer_name"
+            "render_dir": path to slap render files
+            "output_nk": path to .nk file
     """
 
-    addLog(f"Full output info : {output_info}")
+    data = {}
+    data["ocio_config"] = get_file_path_from_config("OCIO")
 
-    if not output_info or len(output_info) == 0:
-        addLog("No data to treat")
-        return
+    layers = []
+    for idx, info in enumerate(output_info):
+        directory = info["directory"]
+        pattern = info["pattern"]
+        first_frame = info["first_frame"]
+        last_frame = info["last_frame"]
+        layer_name = info.get("layer_name", f"Layer{idx}")
+
+        full_path = f"{directory}/{pattern}"
+
+        layer = {
+            "path": full_path,
+            "first_frame": first_frame,
+            "last_frame": last_frame,
+            "layer_name": layer_name,
+        }
+        layers.append(layer)
+
+    data["layers"] = layers
+    data["render_dir"] = paths["render_dir"]
+    data["output_nk"] = paths["output_nk"]
+
+    return data
+
+
+def run_nuke_builder(data):
+    """
+    Write the payload to a temp JSON file and run the static builder in Nuke.
+
+    Returns the builder's exit code (0 == success).
+    """
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+        json.dump(data, f)
+        data_path = f.name
+
+    addLog(f"\nData file: {data_path}")
+
+    nuke_exe = get_nuke_executable()
+    cmd = [nuke_exe, "-t", BUILD_SLAPCOMP_SCRIPT]
+    # Full env copy + our addition (a partial env breaks Nuke on Windows).
+    env = {**os.environ, "SLAPCOMP_DATA": data_path}
+
+    addLog(f"Commande: {' '.join(cmd)}")
+
+    try:
+        process = subprocess.Popen(
+            cmd,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            universal_newlines=True,
+        )
+        for line in iter(process.stdout.readline, ""):
+            if line:
+                addLog(line.rstrip())
+        process.wait()
+        return process.returncode
+    except Exception as e:
+        addLog(f"ERROR: {str(e)}")
+        return -1
+    finally:
+        try:
+            os.unlink(data_path)
+        except OSError:
+            pass
+
+
+def resolve_slapcomp_paths(output_info):
+    """Resolve the paths to the SlapComps"""
+    results = {}
 
     # Get first item info
     first_info = output_info[0]
     first_directory = first_info.get("directory", "")
-
-    # Get basic info from metadata
     project = first_info.get("project", "Unknown")
-    sequence = first_info.get("sequence", "Unknown")
-    shot = first_info.get("shot", "Unknown")
 
     # Get complete prism info
     prism_info = extract_prism_from_filesystem_path(first_directory)
 
     # Build prism path if complete
     if prism_info:
+        print(f"Debug: Project: ¨{prism_info}")
         shot_path = prism_info["shot_path"]
         project = prism_info.get("project", project)
         sequence = prism_info["sequence"]
@@ -1423,195 +1499,80 @@ def call_nuke_script(output_info, render_mode="none"):
         render_filename = f"{render_filename_base}_v{next_version:03d}.%04d.exr"
         job_name = None
 
+        project = sequence = shot = department = "Unknown"
+
         addLog("\n=== Structure Prism not detected, using fallback ===")
+
+    results = {
+        "scenefile_dir": scenefile_dir,
+        "render_dir": render_dir,
+        "render_filename_base": render_filename_base,
+        "next_version": next_version,
+        "output_nk": output_nk,
+        "render_filename": render_filename,
+        "job_name": job_name,
+        "project": project,
+        "sequence": sequence,
+        "shot": shot,
+        "department": department,
+    }
+
+    return results
+
+
+def call_nuke_script(output_info, render_mode="none"):
+
+    addLog(f"Full output info : {output_info}")
+
+    if not output_info or len(output_info) == 0:
+        addLog("No data to treat")
+        return
+
+    slapcomp_paths = resolve_slapcomp_paths(output_info)
+    output_nk = slapcomp_paths["output_nk"]
 
     addLog("\nGenerating slapcomp")
     addLog(f"  Scenefile: {normalize_path_for_nuke(output_nk)}")
-    addLog(f"  Render dir: {normalize_path_for_nuke(render_dir)}")
-    addLog(f"  Render filename: {render_filename}")
+    addLog(f"  Render dir: {normalize_path_for_nuke(slapcomp_paths['render_dir'])}")
+    addLog(f"  Render filename: {slapcomp_paths['render_filename']}")
 
     # Create necessary files
-    os.makedirs(scenefile_dir, exist_ok=True)
-    os.makedirs(render_dir, exist_ok=True)
+    os.makedirs(slapcomp_paths["scenefile_dir"], exist_ok=True)
+    os.makedirs(slapcomp_paths["render_dir"], exist_ok=True)
 
-    # Genereate temp python nuke script
-    ocio_config = get_file_path_from_config("OCIO")
-    script_content = f"""
-import nuke
-import os
+    data = build_slapcomp_data(output_info, slapcomp_paths)
+    returncode = run_nuke_builder(data)
 
-# Clear existing script
-nuke.scriptClear()
+    if returncode == 0:
+        if os.path.exists(output_nk):
+            addLog("\n=== SUCCESS ===")
+            addLog(f"Slap comp cree: {normalize_path_for_nuke(output_nk)}")
 
-# Configure OCIO
-root = nuke.toNode("root")
-root.knob("colorManagement").setValue("OCIO")
-root.knob("OCIO_config").setValue("custom")
-root.knob("customOCIOConfigPath").setValue({ocio_config})
+            # Launch dependeing on selected mode
+            if render_mode != "none":
+                all_first = min(info["first_frame"] for info in output_info)
+                all_last = max(info["last_frame"] for info in output_info)
 
-read_nodes = []
-
-# Configuration positionnement nodes
-x_position = 0
-spacing = 200  # Espacement horizontal entre Read nodes
-
-# Create Read nodes
-"""
-
-    for idx, info in enumerate(output_info):
-        directory = info["directory"]
-        pattern = info["pattern"]
-        first_frame = info["first_frame"]
-        last_frame = info["last_frame"]
-        layer_name = info.get("layer_name", f"Layer{idx}")
-
-        full_path = f"{directory}/{pattern}"
-        x_pos = idx * 200  # Calcule position X pour ce Read node
-
-        script_content += f"""
-# Read node {idx}: {layer_name}
-read{idx} = nuke.createNode('Read', inpanel=False)
-read{idx}.knob('file').setValue('{full_path}')
-read{idx}.knob('first').setValue({first_frame})
-read{idx}.knob('last').setValue({last_frame})
-read{idx}.knob('origfirst').setValue({first_frame})
-read{idx}.knob('origlast').setValue({last_frame})
-read{idx}.knob('label').setValue('{layer_name}')
-read{idx}.setXYpos({x_pos}, 0)
-read_nodes.append(read{idx})
-
-"""
-
-    # Ajoute configuration frame range
-    script_content += """
-# Configure le frame range du script
-if read_nodes:
-    all_first = min(int(n.knob('first').value()) for n in read_nodes)
-    all_last = max(int(n.knob('last').value()) for n in read_nodes)
-    nuke.root().knob('first_frame').setValue(all_first)
-    nuke.root().knob('last_frame').setValue(all_last)
-
-"""
-
-    # Ajoute les Merge nodes
-    script_content += """
-# Create Merge stack avec positionnement
-merge_start_y = 150
-merge_spacing = 100
-merge_x = 0  # Position X fixe pour tous les merges
-current_merge_y = merge_start_y
-
-current_node = read_nodes[0]
-
-for i in range(1, len(read_nodes)):
-    merge = nuke.createNode('Merge2', inpanel=False)
-"""
-
-    # Configure merge operations
-    for idx in range(1, len(output_info)):
-        merge_op = output_info[idx].get("merge_operation", "over")
-        script_content += f"""
-    if i == {idx}:
-        merge.knob('operation').setValue('{merge_op}')
-"""
-
-    script_content += """
-    merge.setInput(0, current_node)  # B input (background)
-    merge.setInput(1, read_nodes[i])  # A input (foreground)
-    merge.setXYpos(merge_x, current_merge_y)
-    current_node = merge
-    current_merge_y += merge_spacing
-
-# Create Write node
-write = nuke.createNode('Write', inpanel=False)
-write.knob('file').setValue('{render_path}')
-write.knob('file_type').setValue('exr')
-write.knob('compression').setValue('DWAB')
-write.knob('channels').setValue('rgba')
-write.setInput(0, current_node)
-write.setXYpos(merge_x, current_merge_y + 50)
-write.knob('create_directories').setValue(True)
-
-# Save script
-nuke.scriptSaveAs('{output_nk}', overwrite=1)
-
-print("Slap comp created successfully: {output_nk}")
-""".format(
-        render_path=normalize_path_for_nuke(f"{render_dir}/{render_filename}"),
-        output_nk=normalize_path_for_nuke(output_nk),
-    )
-
-    # Write temporary script
-    temp_script = tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False)
-    temp_script.write(script_content)
-    temp_script_path = temp_script.name
-    temp_script.close()
-
-    addLog(f"\nScript temporaire: {temp_script_path}")
-
-    # Execute nuke in terminal
-    nuke_exe = get_nuke_executable()
-    cmd = [nuke_exe, "-t", temp_script_path]
-
-    addLog(f"Commande: {' '.join(cmd)}")
-
-    try:
-        process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            universal_newlines=True,
-        )
-
-        # Log output
-        for line in iter(process.stdout.readline, ""):
-            if line:
-                addLog(line.rstrip())
-
-        process.wait()
-
-        # Delete temp script
-        try:
-            os.unlink(temp_script_path)
-        except Exception:
-            pass
-
-        if process.returncode == 0:
-            if os.path.exists(output_nk):
-                addLog("\n=== SUCCESS ===")
-                addLog(f"Slap comp cree: {normalize_path_for_nuke(output_nk)}")
-
-                # Launch dependeing on selected mode
-                if render_mode != "none":
-                    all_first = min(info["first_frame"] for info in output_info)
-                    all_last = max(info["last_frame"] for info in output_info)
-
-                    if render_mode == "local":
-                        render_nuke_script(output_nk, all_first, all_last)
-                    elif render_mode == "deadline":
-                        submit_to_deadline(
-                            output_nk,
-                            all_first,
-                            all_last,
-                            output_info,
-                            render_dir,
-                            render_filename,
-                            job_name,
-                        )
-
-                    generate_versioninfo(
-                        output_nk, sequence, shot, department, next_version
+                if render_mode == "local":
+                    render_nuke_script(output_nk, all_first, all_last)
+                elif render_mode == "deadline":
+                    submit_to_deadline(
+                        output_nk,
+                        all_first,
+                        all_last,
+                        output_info,
+                        slapcomp_paths["render_dir"],
+                        slapcomp_paths["render_filename"],
+                        slapcomp_paths["job_name"],
                     )
 
-            else:
-                addLog("\n=== WARNING ===")
-                addLog(f"File not found: {normalize_path_for_nuke(output_nk)}")
-        else:
-            addLog("\n=== ERROR ===")
-            addLog(f"Return code: {process.returncode}")
-
-    except Exception as e:
-        addLog(f"ERROR: {str(e)}")
+                generate_versioninfo(
+                    output_nk,
+                    slapcomp_paths["sequence"],
+                    slapcomp_paths["shot"],
+                    slapcomp_paths["department"],
+                    slapcomp_paths["next_version"],
+                )
 
 
 # ============================================================================
