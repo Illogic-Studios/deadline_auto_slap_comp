@@ -247,14 +247,19 @@ def get_combined_job_completion(jobs):
             'total_frames': int
         }
     """
+    total_tasks = 0
     total_completed = 0
+
     total_frames = 0
+    total_completed_frames = 0
+
     all_completed = True
     any_failed = False
 
     for job in jobs:
         frames_list = job.JobFramesList
-        job_completed = job.JobCompletedTasks
+        job_total_tasks = job.JobTaskCount
+        job_completed_tasks = job.JobCompletedTasks
 
         # Count total frames
         job_frames = 0
@@ -262,31 +267,28 @@ def get_combined_job_completion(jobs):
             job_frames = len(list(frames_list))
 
         total_frames += job_frames
-        total_completed += job_completed
+        total_tasks += job_total_tasks
+        total_completed += job_completed_tasks
 
         # Check status
         if job.JobStatus == "Failed":
             any_failed = True
-        if job_completed < job_frames:
+        if job_completed_tasks < job_total_tasks:
             all_completed = False
 
-    # Fallback: if jobs "Completed" but no completed frames, check disk
-    if (
-        total_completed == 0
-        and total_frames > 0
-        and all([job.JobStatus == "Completed" for job in jobs])
-    ):
+    if all_completed:
         addLog(
-            f"\tJobs marked as Completed but 0/{total_frames} frames reported, checking filesystem..."
+            f"\tJobs marked as Completed with {total_frames} frames, checking filesystem"
         )
-
-        # Reset totals
-        total_frames = 0
-        total_completed = 0
 
         for job in jobs:
             output_dirs = job.JobOutputDirectories
-            if output_dirs and len(output_dirs) > 0:
+            if (
+                output_dirs
+                and len(output_dirs) > 0
+                and total_completed_frames != total_frames
+            ):
+                
                 output_dir = output_dirs[0]
                 addLog(f"  Checking directory: {output_dir}")
 
@@ -295,8 +297,7 @@ def get_combined_job_completion(jobs):
 
                 if seq_info and seq_info.get("total_frames", 0) > 0:
                     frames_on_disk = seq_info["total_frames"]
-                    total_frames += frames_on_disk
-                    total_completed += frames_on_disk
+                    total_completed_frames = frames_on_disk
                     addLog(
                         f"  Filesystem verification: Found {frames_on_disk} frames on disk"
                     )
@@ -308,9 +309,9 @@ def get_combined_job_completion(jobs):
     # Calculate percentage
     completion_pct = 0
     if total_frames > 0:
-        completion_pct = int((total_completed * 100.0) / total_frames)
+        completion_pct = int((total_completed_frames * 100.0) / total_frames)
         addLog(
-            f"  Final completion: {total_completed}/{total_frames} frames = {completion_pct}%"
+            f"  Final completion: {total_completed_frames}/{total_frames} frames = {completion_pct}%"
         )
 
     # Determine status
