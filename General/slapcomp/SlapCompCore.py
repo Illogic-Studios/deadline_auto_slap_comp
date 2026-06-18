@@ -1975,6 +1975,7 @@ def autoSlapIt(selected_jobs: list, save_log=True):
         preset_data = load_preset(project, sequence, shot)
         if preset_data:
             ordered_output_info = apply_preset_data(output_info, preset_data)
+            ordered_output_info = [i for i in ordered_output_info if i.get("included", True)]
             addLog("\nOrdre des layers applique depuis preset:", save_log)
             for idx, info in enumerate(ordered_output_info):
                 layer_name = info.get("layer_name", "Unknown")
