@@ -9,6 +9,7 @@ import os
 import tempfile
 import subprocess
 
+PYTHON_JOB_POSTJOB_SCRIPT = r"R:\devAndrew\Deadline\PublishToShotgridPostJob\publishToSg.py"
 
 def submit_slap_comp_job(
     nk_path,
@@ -101,6 +102,7 @@ def submit_slap_comp_job(
             f.write(f"ChunkSize={chunk_size}\n")
             f.write(f"OutputDirectory0={output_directory}\n")
             f.write(f"OutputFilename0={output_filename}\n")
+            f.write(f"PostJobScript={PYTHON_JOB_POSTJOB_SCRIPT}\n")
 
         # Écrit le fichier plugin info
         with open(plugin_info_file, "w") as f:
